@@ -19,9 +19,9 @@ Single user, single machine, power user running 3-5 concurrent agent sessions.
 - **Backend**: Elixir / Phoenix
 - **Frontend**: Phoenix LiveView (structured views) + xterm.js (terminal embeds)
 - **Process management**: OTP GenServers + Supervisors for session lifecycle
-- **Terminal I/O**: PTY spawning via Elixir Ports (using `script -q /dev/null` or `exile` for PTY allocation), WebSocket bridge to xterm.js via Phoenix Channels
+- **Terminal I/O**: PTY spawning via a small C Port program that calls `forkpty()` — the Port program allocates a real PTY, execs the agent process, and relays I/O to the Elixir VM over stdin/stdout. WebSocket bridge to xterm.js via Phoenix Channels.
 - **LLM summarization**: Anthropic API (Claude Haiku) via `req` HTTP client
-- **Data**: In-memory (ETS) for session state, no database needed
+- **Data**: ETS for live session state + DETS for persistence. Session history (activity feed, summaries) is periodically flushed to DETS so it survives application restarts. On startup, the app checks for orphaned agent processes and reconnects.
 
 ## Supported Agents
 
@@ -41,21 +41,26 @@ Adding a new agent requires: a spawn command, and optionally a hook integration 
 ```
 Application Supervisor
 ├── SessionRegistry (GenServer)
-│   └── Tracks all active sessions by ID
+│   └── Tracks all active sessions by ID, ETS-backed
 ├── SessionSupervisor (DynamicSupervisor)
-│   └── Per-session process group:
-│       ├── Session.Server (GenServer) — lifecycle, state, metadata
-│       ├── Session.PTY (GenServer) — owns the PTY Port, raw I/O
-│       ├── Session.Parser (GenServer) — output parsing, event extraction
-│       └── Session.Summarizer (GenServer) — LLM summarization of activity
-├── Discovery.Watcher (GenServer)
-│   └── Watches for externally-launched agent processes, auto-attaches
+│   └── Spawns per-session Supervisors:
+│       └── Session.GroupSupervisor (Supervisor, rest_for_one)
+│           ├── Session.PTY (GenServer) — owns the C Port PTY, raw I/O
+│           ├── Session.Parser (GenServer) — output parsing, event extraction
+│           ├── Session.Summarizer (GenServer) — LLM summarization
+│           └── Session.Server (GenServer) — lifecycle, state, metadata
+│           # rest_for_one: if PTY dies, Parser/Summarizer/Server restart.
+│           # If Summarizer dies, only Server restarts (state refresh).
+│           # PTY crash does NOT lose the underlying agent process — the C
+│           # Port program keeps the PTY open; we reconnect on restart.
+├── Hook.Receiver (Phoenix endpoint: POST /api/hooks)
+│   └── Receives structured JSON events from Claude Code hooks via curl
 ├── Phoenix.Endpoint
 │   ├── LiveView: DashboardLive — main tab-bar UI
 │   ├── LiveView: SessionLive — individual session detail
 │   └── Channel: TerminalChannel — xterm.js WebSocket bridge
-└── Theme.Server (GenServer)
-    └── Loads and serves theme configs
+└── Persistence.Writer (GenServer)
+    └── Periodically flushes ETS session state to DETS
 ```
 
 ### Data Flow
@@ -75,7 +80,7 @@ xterm.js ↔ Phoenix Channel ↔ Session.PTY (bidirectional for terminal mode)
 ### Tab Bar (top)
 
 Horizontal tabs, one per session. Each tab shows:
-- **Status dot** — color-coded (green=working, yellow=needs input, blue=working, gray=idle/done, red=error)
+- **Status dot** — color-coded (green=working, yellow=needs input, gray=idle/done, red=error)
 - **Session name** — project or task name
 - **Branch name** — abbreviated, secondary text
 - **+ button** — create new session
@@ -125,13 +130,19 @@ Active tab has an accent-colored bottom border.
 
 ### Tier 1: Hook-based (Claude Code)
 
-Claude Code supports hooks — shell commands that fire on events (tool calls, completions, errors). We register hooks that emit structured JSON to our backend via HTTP POST or Unix socket:
+Claude Code supports hooks — shell commands that fire on events (tool calls, completions, errors). We register hooks that POST structured JSON to our backend at `http://localhost:4000/api/hooks`:
 
-```json
-{"event": "tool_call", "tool": "Edit", "file": "src/auth.ts", "session_id": "abc123"}
-{"event": "agent_spawn", "description": "Test writer", "session_id": "abc123"}
-{"event": "completion", "session_id": "abc123"}
+```bash
+# Example hook in ~/.claude/settings.json
+# The hook script POSTs event data via curl:
+curl -s -X POST http://localhost:4000/api/hooks \
+  -H "Content-Type: application/json" \
+  -d '{"event":"tool_call","tool":"Edit","file":"src/auth.ts","session_id":"$SESSION_ID"}'
 ```
+
+The `Hook.Receiver` Phoenix controller receives these, routes them to the correct Session.Parser by session ID, and they flow through the normal event pipeline.
+
+**Hook registration**: On first launch, the app checks `~/.claude/settings.json` for SAM hooks. If missing, it prompts the user to approve adding them. Hooks are non-destructive (additive to existing hooks).
 
 This gives us clean, structured events with zero parsing.
 
@@ -148,14 +159,23 @@ For any agent, we can feed chunks of raw output to Haiku and ask for:
 
 This is the universal adapter. More expensive but works for any agent regardless of output format.
 
+### Decision-Point Detection
+
+A "decision point" is when the agent pauses between phases of work. Detection varies by tier:
+
+- **Tier 1 (hooks)**: Hook events explicitly signal decision points — tool call completion, agent spawn, task completion, permission request.
+- **Tier 2 (stream parsing)**: Pattern-match known prompts (e.g., `? Allow`, `[y/N]`, `Press enter`). Also detect output quiescence — if no new output for 3+ seconds after a burst of activity, treat as a decision point.
+- **Tier 3 (LLM)**: Feed the last N seconds of buffered output to Haiku and ask: "Is the agent waiting for input, actively working, or done? Summarize what just happened." Debounce to at most 1 call per 10 seconds per session to control cost.
+
 ### Decision-Point Summarization
 
 The core noise-reduction feature. The Summarizer watches the event stream and:
 
-1. Buffers events between "decision points" (moments where the agent pauses, asks for input, completes a subtask, or changes direction)
-2. When a decision point is reached, sends the buffered events to Haiku with a prompt like: "Summarize what happened in this sequence of actions in one sentence. Focus on the outcome, not the process."
+1. Buffers events between decision points (as detected above)
+2. When a decision point is reached, sends the buffered events to Haiku: "Summarize what happened in this sequence of actions in one sentence. Focus on the outcome, not the process."
 3. The summary replaces the raw event sequence in the activity feed
 4. Raw events are preserved and viewable on expand
+5. Summaries are debounced — at most 1 LLM call per 5 seconds per session. Pending events accumulate and get summarized in the next batch.
 
 ## Theming
 
@@ -163,35 +183,26 @@ The core noise-reduction feature. The Summarizer watches the event stream and:
 
 Themes are defined as a set of CSS custom properties + a small metadata config:
 
-```elixir
-# Theme config (loaded from TOML files)
-%Theme{
-  name: "tron",
-  display_name: "Tron / CRT",
-  colors: %{
-    bg_primary: "#0a0a1a",
-    bg_secondary: "#12122a",
-    accent: "#00ffff",
-    accent_glow: "rgba(0, 255, 255, 0.3)",
-    text_primary: "#e0e0e0",
-    text_secondary: "#888888",
-    status_working: "#00ff00",
-    status_input: "#ffcc00",
-    status_idle: "#666666",
-    status_error: "#ff4444",
-    status_done: "#888888",
-    border: "rgba(0, 255, 255, 0.2)",
-    diff_add: "#00ff00",
-    diff_modify: "#ffcc00",
-    diff_delete: "#ff4444"
-  },
-  effects: %{
-    scanlines: true,
-    glow: true,
-    crt_curve: false
-  }
+```css
+/* Theme via CSS custom properties — each theme is a CSS class on <body> */
+body.theme-tron {
+  --bg-primary: #0a0a1a;
+  --bg-secondary: #12122a;
+  --accent: #00ffff;
+  --accent-glow: rgba(0, 255, 255, 0.3);
+  --text-primary: #e0e0e0;
+  --text-secondary: #888888;
+  --status-working: #00ff00;
+  --status-input: #ffcc00;
+  --status-idle: #666666;
+  --status-error: #ff4444;
+  --border: rgba(0, 255, 255, 0.2);
+  --scanlines: block;  /* display value for scanline overlay */
+  --glow-intensity: 1;
 }
 ```
+
+Theme switching is pure client-side — swap the CSS class on `<body>`, stored in localStorage. No server-side theme infrastructure needed.
 
 ### Built-in Themes
 
@@ -202,26 +213,21 @@ Themes are defined as a set of CSS custom properties + a small metadata config:
 
 ### Custom Themes
 
-Users drop a `.toml` file in `~/.config/secret-agent-man/themes/`. The app watches this directory and hot-reloads.
+Users can create custom themes by adding CSS files to `~/.config/secret-agent-man/themes/` that override the CSS custom properties. No hot-reload infrastructure needed for v1 — a page refresh picks up new themes.
 
-## Session Discovery
+## Session Creation
 
-### Launched from UI
+### Launched from UI (primary, v1)
 
-User clicks "+", fills out the new session dialog. Backend spawns the agent process in a PTY, wraps it in the session process group. Full control from the start.
+User clicks "+", fills out the new session dialog. Backend spawns the agent process in a real PTY via the C Port program, wraps it in the session process group. Full control from the start — hooks registered, output parsed, terminal accessible.
 
-### Auto-discovery of existing sessions
+### Future: External session attachment (v2, research needed)
 
-The Discovery.Watcher process periodically scans for running agent processes:
-- `pgrep -f "claude"` / `pgrep -f "opencode"` etc.
-- Checks if the process is already tracked
-- For untracked processes, attempts to attach by:
-  1. Identifying the working directory (`lsof -p PID` or `/proc/PID/cwd`)
-  2. Reading the git branch from that directory
-  3. Creating a Session.Server with limited capabilities (can observe via PTY attach, but hooks may not be registered)
-  4. Starting LLM summarization on the output stream
+Attaching to an already-running agent's PTY from another process is not feasible without OS-level tricks (ptrace, reptyr) that macOS SIP blocks. Potential v2 approaches:
+- **tmux-based**: If agents are launched inside tmux, we can `tmux capture-pane` and `tmux send-keys` to observe/interact without PTY attachment.
+- **Wrapper script**: Provide a `sam-launch` wrapper that users run instead of `claude` directly — it spawns the agent inside a SAM-managed PTY and registers with the dashboard.
 
-Discovered sessions get a "discovered" badge and may have reduced functionality (no hook events, summarization-only activity feed).
+For v1, all sessions must be launched from the UI.
 
 ## Session Lifecycle
 
@@ -237,71 +243,81 @@ Created → Starting → Running → (Needs Input ↔ Running) → Done
 - **Done**: agent completed its task
 - **Error**: agent crashed or encountered an unrecoverable error
 
-Sessions can be manually paused (send Ctrl+C), resumed, or killed from the UI.
+Sessions can be manually interrupted (send SIGINT) or killed (SIGTERM) from the UI. Note: interrupt behavior varies by agent — Claude Code handles SIGINT gracefully, others may not.
+
+### Shutdown Behavior
+
+- **Browser tab closed**: Agent processes keep running. Dashboard reconnects on next visit.
+- **Phoenix server stopped**: Agent processes spawned via the C Port program receive SIGHUP when the Port closes. The Port program is designed to keep the child alive by default — on restart, the app reads DETS for session metadata and attempts to re-adopt orphaned processes by PID.
+- **Agent process exits**: Session transitions to Done (exit 0) or Error (non-zero). PTY Port detects EOF and notifies Session.Server.
+
+## ANSI Handling
+
+Agent CLIs emit heavy ANSI escape sequences (colors, cursor movement, alternate screen buffer). Two separate concerns:
+
+- **Terminal view (xterm.js)**: xterm.js handles all ANSI natively — no processing needed. Raw PTY bytes flow through the Channel directly.
+- **Structured view (Parser)**: The Parser strips ANSI sequences before extracting events. Use a library like `ansi_to_html` for any cases where we want to preserve formatting in the activity feed, but default to plain text summaries.
+
+The Parser maintains a virtual terminal state (tracking cursor position, screen content) only if needed for agents that use alternate screen buffer or cursor-addressed output. For v1, simple line-buffered output with ANSI stripping is sufficient.
+
+## Asset Bundling
+
+xterm.js is an npm package. Phoenix's default esbuild setup doesn't include npm. We use npm in the `assets/` directory:
+
+- `assets/package.json` declares `xterm`, `xterm-addon-fit`, `xterm-addon-webgl` as dependencies
+- `assets/js/terminal.js` imports xterm and connects to the Phoenix Channel
+- esbuild bundles everything into `priv/static/assets/app.js`
+
+This is the standard Phoenix approach for JS dependencies beyond what esbuild alone provides.
 
 ## Project Structure
 
 ```
 secret-agent-man/
+├── c_src/
+│   └── pty_port.c                    # C Port program: forkpty() + I/O relay
 ├── lib/
 │   ├── sam/                          # Core application
 │   │   ├── application.ex            # OTP application + supervisor tree
 │   │   ├── session/
 │   │   │   ├── registry.ex           # Session registry (ETS-backed)
-│   │   │   ├── supervisor.ex         # DynamicSupervisor for sessions
-│   │   │   ├── server.ex             # Per-session GenServer
-│   │   │   ├── pty.ex                # PTY process management
-│   │   │   ├── parser.ex             # Output parsing (hooks + patterns)
-│   │   │   └── summarizer.ex         # LLM summarization
+│   │   │   ├── group_supervisor.ex   # Per-session Supervisor (rest_for_one)
+│   │   │   ├── server.ex             # Per-session GenServer (state, lifecycle)
+│   │   │   ├── pty.ex                # PTY process management (wraps C Port)
+│   │   │   ├── parser.ex             # Output parsing (hooks + patterns + ANSI strip)
+│   │   │   └── summarizer.ex         # LLM decision-point summarization
 │   │   ├── agents/
-│   │   │   ├── behaviour.ex          # Agent behaviour (spawn, detect, parse)
-│   │   │   ├── claude_code.ex        # Claude Code adapter (hooks)
-│   │   │   ├── opencode.ex           # OpenCode adapter
-│   │   │   ├── codex.ex              # Codex CLI adapter
-│   │   │   ├── gemini.ex             # Gemini CLI adapter
-│   │   │   └── copilot.ex            # Copilot CLI adapter
-│   │   ├── discovery/
-│   │   │   └── watcher.ex            # Process discovery
-│   │   ├── themes/
-│   │   │   └── server.ex             # Theme loading + hot-reload
+│   │   │   ├── behaviour.ex          # Agent behaviour (spawn cmd, detect patterns)
+│   │   │   └── claude_code.ex        # Claude Code adapter (hook-based)
+│   │   ├── persistence.ex            # ETS ↔ DETS flush + orphan recovery
 │   │   └── llm/
-│   │       └── client.ex             # Anthropic API client
+│   │       └── client.ex             # Anthropic API client (req-based)
 │   ├── sam_web/                      # Phoenix web layer
 │   │   ├── live/
-│   │   │   ├── dashboard_live.ex     # Main dashboard (tab bar + panels)
-│   │   │   ├── session_live.ex       # Session detail view
-│   │   │   └── new_session_live.ex   # New session dialog
+│   │   │   └── dashboard_live.ex     # Main dashboard (tabs + panels + new session)
 │   │   ├── channels/
 │   │   │   └── terminal_channel.ex   # xterm.js WebSocket bridge
-│   │   ├── components/
-│   │   │   ├── tab_bar.ex            # Tab bar component
-│   │   │   ├── activity_feed.ex      # Activity feed component
-│   │   │   ├── agent_list.ex         # Agent list component
-│   │   │   ├── git_changes.ex        # Git diff component
-│   │   │   └── terminal.ex           # xterm.js wrapper component
+│   │   ├── controllers/
+│   │   │   └── hook_controller.ex    # POST /api/hooks receiver
 │   │   └── layouts/
 │   │       └── root.html.heex        # Root layout with theme CSS vars
 │   └── sam_web.ex
 ├── assets/
+│   ├── package.json                  # npm deps: xterm, xterm-addon-fit, etc.
 │   ├── js/
 │   │   ├── app.js
 │   │   └── terminal.js               # xterm.js setup + channel connection
 │   └── css/
-│       ├── app.css                    # Base styles
-│       └── themes/
-│           ├── tron.css               # Tron theme variables
-│           ├── synthwave.css          # Synthwave theme variables
-│           ├── phosphor.css           # Phosphor theme variables
-│           └── amber.css              # Amber theme variables
+│       └── app.css                   # Base styles + theme CSS custom properties
 ├── config/
 │   ├── config.exs
 │   ├── dev.exs
-│   └── runtime.exs                   # API keys, theme dir, etc.
-├── priv/
-│   └── themes/                       # Built-in theme TOML files
+│   └── runtime.exs                   # API keys, theme config
 ├── mix.exs
-└── README.md
+└── Makefile                          # Compiles c_src/pty_port.c
 ```
+
+Note: Only `claude_code.ex` adapter is listed — other agent adapters (opencode, codex, gemini, copilot) are structurally identical and will be added as needed. No premature files.
 
 ## Key Dependencies
 
@@ -313,26 +329,24 @@ defp deps do
     {:phoenix_live_view, "~> 1.0"},
     {:phoenix_html, "~> 4.0"},
     {:esbuild, "~> 0.8", runtime: Mix.env() == :dev},
-    {:tailwind, "~> 0.2", runtime: Mix.env() == :dev},
     {:req, "~> 0.5"},              # HTTP client for Anthropic API
-    {:jason, "~> 1.4"},            # JSON encoding/decoding
-    {:toml, "~> 0.7"},             # Theme config parsing
-    {:file_system, "~> 1.0"},      # File watching (theme hot-reload)
-    {:exile, "~> 0.10"}            # PTY/process I/O (alternative to raw Ports)
+    {:jason, "~> 1.4"}             # JSON encoding/decoding
   ]
 end
 ```
+
+Minimal dependency set. The C Port program (`pty_port.c`) is compiled via `make` and has no external dependencies beyond POSIX `<pty.h>`.
 
 ## Acceptance Verification
 
 ### Automated Checks
 
-1. **Session spawn**: Launch Claude Code from UI → verify PTY process exists, session appears in tab bar within 2s
-2. **Auto-discovery**: Start `claude` in a separate terminal → verify it appears in the dashboard within 10s
+1. **PTY spike**: Compile `pty_port.c`, spawn a shell via Elixir Port, send a command, read output — proves the PTY layer works
+2. **Session spawn**: Launch Claude Code from UI → verify PTY process exists, session appears in tab bar within 2s
 3. **Activity summarization**: Trigger a multi-step agent task → verify activity feed shows summarized entries (not raw tool calls)
 4. **Terminal embed**: Click "Open Terminal" → verify xterm.js connects and shows live agent output, keyboard input reaches the agent
 5. **Theme switching**: Change theme via UI → verify all CSS variables update, no visual artifacts
-6. **Needs-input detection**: Agent reaches a permission prompt → verify status changes to "needs input" within 3s, quick-action buttons appear
+6. **Needs-input detection (hook-based)**: Claude Code reaches a permission prompt → verify status changes to "needs input" within 3s via hook event, quick-action buttons appear
 7. **Multi-session**: Run 3 concurrent sessions → verify all tabs show correct independent status and activity
 
 ### Verification Access
@@ -345,6 +359,6 @@ end
 
 - All 7 automated checks pass
 - Activity feed entries are ≤2 sentences each (no raw noise)
-- Tab status updates within 3s of actual agent state change
+- Tab status updates within 3s of actual agent state change (hook-based agents); ≤15s for stream-parsed agents
 - Terminal embed has <100ms input latency
 - Theme switch is instant (no page reload)
