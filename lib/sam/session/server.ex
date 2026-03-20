@@ -108,11 +108,12 @@ defmodule Sam.Session.Server do
   @impl true
   def handle_info({:summary, _session_id, summary}, state) do
     # Normalize to a consistent format the LiveView can render
+    # Don't store raw_events in state — they contain raw PTY bytes that
+    # can't be JSON-serialized and will crash LiveView
     entry = %{
       type: :summary,
       text: summary.summary,
-      timestamp: summary.timestamp,
-      raw_events: summary.raw_events
+      timestamp: summary.timestamp
     }
     activity = [entry | state.activity] |> Enum.take(100)
     state = %{state | activity: activity}

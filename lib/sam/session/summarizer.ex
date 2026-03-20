@@ -77,6 +77,10 @@ defmodule Sam.Session.Summarizer do
       {:error, _} -> Enum.join(all_lines, " | ")
     end
 
+    # Ensure the summary is valid UTF-8 and free of control characters
+    # PTY output may contain \r, \x1b leftovers, and other junk
+    summary = sanitize_text(summary)
+
     Phoenix.PubSub.broadcast(Sam.PubSub, "session:#{state.session_id}", {:summary, state.session_id, %{
       summary: summary,
       raw_events: state.buffer,
@@ -90,5 +94,30 @@ defmodule Sam.Session.Summarizer do
   defp cancel_timer(%{timer_ref: ref} = state) do
     Process.cancel_timer(ref)
     %{state | timer_ref: nil}
+  end
+
+  defp sanitize_text(text) when is_binary(text) do
+    text
+    |> String.replace(~r/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/, "")  # strip control chars except \n \r \t
+    |> String.replace(~r/\r\n?/, "\n")                               # normalize line endings
+    |> String.replace(~r/\n{3,}/, "\n\n")                            # collapse blank lines
+    |> String.trim()
+    |> ensure_valid_utf8()
+  end
+  defp sanitize_text(_), do: ""
+
+  defp ensure_valid_utf8(text) do
+    if String.valid?(text) do
+      text
+    else
+      # Replace invalid bytes with replacement character
+      text
+      |> :unicode.characters_to_binary(:utf8, :utf8)
+      |> case do
+        {:error, valid, _} -> valid
+        {:incomplete, valid, _} -> valid
+        valid when is_binary(valid) -> valid
+      end
+    end
   end
 end
