@@ -24,7 +24,8 @@ defmodule Sam.Session.TranscriptWatcher do
       workdir: workdir,
       path: test_path,
       offset: if(test_path, do: file_size(test_path), else: 0),
-      line_buffer: ""
+      line_buffer: "",
+      started_at: System.os_time(:second)
     }
 
     send(self(), :poll)
@@ -34,7 +35,7 @@ defmodule Sam.Session.TranscriptWatcher do
   @impl true
   def handle_info(:poll, %{path: nil} = state) do
     # Try to find the JSONL file
-    case find_jsonl(state.workdir) do
+    case find_jsonl(state.workdir, state.started_at) do
       nil ->
         schedule_poll()
         {:noreply, state}
@@ -150,7 +151,7 @@ defmodule Sam.Session.TranscriptWatcher do
 
   defp handle_record(_, _), do: :ok
 
-  defp find_jsonl(workdir) do
+  defp find_jsonl(workdir, started_at) do
     dir = project_dir(workdir)
 
     case File.ls(dir) do
@@ -158,11 +159,17 @@ defmodule Sam.Session.TranscriptWatcher do
         files
         |> Enum.filter(&String.ends_with?(&1, ".jsonl"))
         |> Enum.map(&Path.join(dir, &1))
+        |> Enum.filter(fn path ->
+          case File.stat(path, time: :posix) do
+            {:ok, %{mtime: mtime}} -> mtime >= started_at
+            _ -> false
+          end
+        end)
         |> Enum.sort_by(
           fn path ->
-            case File.stat(path) do
+            case File.stat(path, time: :posix) do
               {:ok, %{mtime: mtime}} -> mtime
-              _ -> {{0, 0, 0}, {0, 0, 0}}
+              _ -> 0
             end
           end,
           :desc
