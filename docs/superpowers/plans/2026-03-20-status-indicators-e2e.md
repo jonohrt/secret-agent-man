@@ -535,3 +535,23 @@ bd close secret-agent-man-k1m.3
 - **Process.sleep in Task 6 is acceptable** — it's waiting for a real 5-second idle timeout in an E2E test, not synchronizing GenServer messages. Use `assert_receive` for unit tests, but E2E tests may need real time waits.
 - **The `@tag :e2e` tag** lets you exclude slow E2E tests from normal `mix test` runs. Configure in `test/test_helper.exs` with `ExUnit.configure(exclude: [:e2e])` if desired.
 - **Wallaby requires Chrome/ChromeDriver** installed. Verify with `chromedriver --version` before running E2E tests.
+
+---
+
+## Diagnosis Findings (Task 1, 2026-03-20)
+
+**Result: The JSONL discovery and parsing pipeline works correctly.** The TranscriptWatcher found the right file, read it, and the pattern matching is correct. The reason status stayed at `:running` was that the test session didn't use any tools (text-only conversation = no `tool_use` records = no events emitted).
+
+**Confirmed with a different JSONL file** that has 121 `tool_use` and 121 `tool_result` records — the format matches our `handle_record/2` patterns exactly.
+
+**Issue found: workdir is nil (Path A applies)**
+- `DashboardLive` sends `workdir: nil` when the form field is blank
+- TranscriptWatcher falls back to `File.cwd!()` which happens to be correct because SAM runs from the project dir
+- But this breaks if a user creates a session targeting a *different* workdir
+- **Fix:** Dashboard should default blank workdir to `File.cwd!()` before passing to GroupSupervisor
+
+**Race condition: real but acceptable for now**
+- The watcher correctly caches the path after first discovery (doesn't re-pick)
+- Multiple same-workdir sessions remain a Phase 4 problem
+
+**Proceed with:** Path A fix (Task 3), then Tasks 2, 4, 5, 6 as planned.

@@ -83,20 +83,13 @@ const TerminalHook = {
     this._resizeHandler = () => this.fitAddon.fit()
     window.addEventListener('resize', this._resizeHandler)
 
-    // Escape to close terminal
-    this._keyHandler = (e) => {
-      if (e.key === 'Escape') {
-        this.pushEvent('toggle_terminal', {})
-      }
-    }
-    document.addEventListener('keydown', this._keyHandler)
+    // Terminal is embedded in bento grid — no escape-to-close needed
   },
 
   destroyed() {
     if (this.channel) this.channel.leave()
     if (this.term) this.term.dispose()
     if (this._resizeHandler) window.removeEventListener('resize', this._resizeHandler)
-    if (this._keyHandler) document.removeEventListener('keydown', this._keyHandler)
   }
 }
 

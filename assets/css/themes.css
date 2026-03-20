@@ -2,6 +2,7 @@
    Single theme for now. Add additional [data-theme="..."] blocks for new themes.
    Keep property names stable — components reference these tokens. */
 
+:root,
 [data-theme="command"] {
   /* Surface hierarchy (dark → light) */
   --surface: #061423;

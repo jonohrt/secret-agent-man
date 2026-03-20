@@ -5,6 +5,8 @@ defmodule SamWeb.DashboardLiveTest do
   test "create_session with blank workdir defaults to cwd", %{conn: conn} do
     {:ok, view, _html} = live(conn, "/")
 
+    sessions_before = Sam.Session.Server.list_sessions()
+
     # Open the new session dialog first
     view |> element(".sam-btn-deploy") |> render_click()
 
@@ -18,12 +20,15 @@ defmodule SamWeb.DashboardLiveTest do
       "prompt" => ""
     })
 
-    # Find the session we just created
-    sessions = Sam.Session.Server.list_sessions()
-    session_id = Enum.find(sessions, fn id -> String.contains?(id, "session-") end)
-    assert session_id, "Expected a session to be created"
+    # Find the session we just created by diffing before/after
+    sessions_after = Sam.Session.Server.list_sessions()
+    [session_id] = sessions_after -- sessions_before
 
-    # Verify workdir is non-nil (defaulted to File.cwd!())
+    on_exit(fn ->
+      Sam.Session.Server.stop(session_id)
+    end)
+
+    # Verify workdir is non-nil (defaulted to File.cwd())
     state = Sam.Session.Server.get_state(session_id)
     assert state.workdir != nil, "Expected workdir to be non-nil, got nil"
     assert state.workdir == File.cwd!()
