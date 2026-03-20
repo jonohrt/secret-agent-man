@@ -20,3 +20,9 @@ config :phoenix_live_view,
 # Sort query params output of verified routes for robust url comparisons
 config :phoenix,
   sort_verified_routes_query_params: true
+
+config :wallaby,
+  otp_app: :sam,
+  driver: Wallaby.Chrome,
+  screenshot_on_failure: true,
+  js_logger: :log
