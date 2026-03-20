@@ -15,6 +15,7 @@ defmodule Sam.Application do
       {DynamicSupervisor, name: Sam.SessionSupervisor, strategy: :one_for_one},
       # Start a worker by calling: Sam.Worker.start_link(arg)
       # {Sam.Worker, arg},
+      Sam.Persistence,
       # Start to serve requests, typically the last entry
       SamWeb.Endpoint
     ]
