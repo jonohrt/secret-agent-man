@@ -71,23 +71,33 @@ defmodule Sam.Session.Summarizer do
         %{type: :agent_spawn} -> ["Spawned subagent"]
         _ -> []
       end)
+      |> Enum.map(&sanitize_text/1)
+      |> Enum.filter(fn line ->
+        # Drop lines that are just whitespace, single chars, or terminal noise
+        trimmed = String.trim(line)
+        String.length(trimmed) > 3 and not String.match?(trimmed, ~r/^[\s│|─┌┐└┘├┤┬┴┼╭╮╰╯═║╔╗╚╝╠╣╦╩╬\-\+\*]+$/)
+      end)
+      |> Enum.uniq()
 
-    summary = case Sam.LLM.Client.summarize(all_lines) do
-      {:ok, text} -> text
-      {:error, _} -> Enum.join(all_lines, " | ")
+    if all_lines == [] do
+      # Nothing meaningful to summarize
+      state
+    else
+      summary = case Sam.LLM.Client.summarize(all_lines) do
+        {:ok, text} -> text
+        {:error, _} -> Enum.join(all_lines, " | ")
+      end
+
+      summary = sanitize_text(summary)
+
+      Phoenix.PubSub.broadcast(Sam.PubSub, "session:#{state.session_id}", {:summary, state.session_id, %{
+        summary: summary,
+        raw_events: state.buffer,
+        timestamp: DateTime.utc_now()
+      }})
+
+      %{state | buffer: []}
     end
-
-    # Ensure the summary is valid UTF-8 and free of control characters
-    # PTY output may contain \r, \x1b leftovers, and other junk
-    summary = sanitize_text(summary)
-
-    Phoenix.PubSub.broadcast(Sam.PubSub, "session:#{state.session_id}", {:summary, state.session_id, %{
-      summary: summary,
-      raw_events: state.buffer,
-      timestamp: DateTime.utc_now()
-    }})
-
-    %{state | buffer: []}
   end
 
   defp cancel_timer(%{timer_ref: nil} = state), do: state
