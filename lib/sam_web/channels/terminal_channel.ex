@@ -16,14 +16,6 @@ defmodule SamWeb.TerminalChannel do
   end
 
   @impl true
-  def handle_info(:request_redraw, socket) do
-    # Trigger a resize — this forces most terminal programs to redraw their screen
-    # Use default size; the client will send the real size momentarily via the resize event
-    Sam.Session.Server.resize(socket.assigns.session_id, 80, 24)
-    {:noreply, socket}
-  end
-
-  @impl true
   def handle_in("input", %{"data" => data}, socket) do
     Sam.Session.Server.send_input(socket.assigns.session_id, data)
     {:noreply, socket}
@@ -36,12 +28,18 @@ defmodule SamWeb.TerminalChannel do
   end
 
   @impl true
+  def handle_info(:request_redraw, socket) do
+    # Trigger a resize — this forces most terminal programs to redraw their screen
+    # Use default size; the client will send the real size momentarily via the resize event
+    Sam.Session.Server.resize(socket.assigns.session_id, 80, 24)
+    {:noreply, socket}
+  end
+
   def handle_info({:pty_output, _session_id, data}, socket) do
     push(socket, "output", %{data: Base.encode64(data)})
     {:noreply, socket}
   end
 
   # Ignore other PubSub messages
-  @impl true
   def handle_info(_, socket), do: {:noreply, socket}
 end

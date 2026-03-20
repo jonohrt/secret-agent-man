@@ -28,6 +28,12 @@ defmodule Sam.Session.GroupSupervisor do
         start: {Sam.Session.Parser, :start_link, [%{session_id: session_id}]}
       },
       %{
+        id: Sam.Session.TranscriptWatcher,
+        start:
+          {Sam.Session.TranscriptWatcher, :start_link,
+           [%{session_id: session_id, workdir: Map.get(opts, :workdir)}]}
+      },
+      %{
         id: Sam.Session.PTY,
         start:
           {Sam.Session.PTY, :start_link,

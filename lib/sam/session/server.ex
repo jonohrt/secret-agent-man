@@ -2,7 +2,7 @@ defmodule Sam.Session.Server do
   use GenServer
   require Logger
 
-  @idle_timeout_ms 1_000
+  @idle_timeout_ms 5_000
 
   defstruct [
     :session_id,
@@ -11,6 +11,7 @@ defmodule Sam.Session.Server do
     :branch,
     :workdir,
     :idle_timer,
+    :idle_timeout_ms,
     status: :starting,
     activity: [],
     agents: []
@@ -61,6 +62,7 @@ defmodule Sam.Session.Server do
       name: Map.get(opts, :name, session_id),
       agent_type: Map.get(opts, :agent_type, :generic),
       workdir: Map.get(opts, :workdir),
+      idle_timeout_ms: Map.get(opts, :idle_timeout_ms, @idle_timeout_ms),
       status: :running
     }
 
@@ -70,7 +72,7 @@ defmodule Sam.Session.Server do
 
   @impl true
   def handle_call(:get_state, _from, state) do
-    {:reply, state, state}
+    {:reply, sanitize_state(state), state}
   end
 
   @impl true
@@ -118,10 +120,10 @@ defmodule Sam.Session.Server do
   end
 
   @impl true
-  def handle_info({:parser_event, _, %{type: :activity}}, state) do
-    # Parser flushed an activity batch — agent was producing real output
+  def handle_info({:parser_event, _, %{type: type}}, state)
+      when type in [:tool_call, :pre_tool_call] do
     state = cancel_idle_timer(state)
-    timer = Process.send_after(self(), :idle_timeout, @idle_timeout_ms)
+    timer = Process.send_after(self(), :idle_timeout, state.idle_timeout_ms)
 
     if state.status != :working do
       state = %{state | status: :working, idle_timer: timer}
@@ -133,13 +135,21 @@ defmodule Sam.Session.Server do
   end
 
   @impl true
+  def handle_info({:parser_event, _, %{type: type}}, state)
+      when type in [:tool_result, :post_tool_call] do
+    state = cancel_idle_timer(state)
+    timer = Process.send_after(self(), :idle_timeout, state.idle_timeout_ms)
+    {:noreply, %{state | idle_timer: timer}}
+  end
+
+  @impl true
   def handle_info({:parser_event, _, _}, state), do: {:noreply, state}
 
   @impl true
   def handle_info({:summary, _session_id, summary}, state) do
     entry = %{
       type: :summary,
-      text: summary.summary,
+      text: sanitize_utf8(summary.summary),
       timestamp: summary.timestamp
     }
 
@@ -189,9 +199,42 @@ defmodule Sam.Session.Server do
     %{state | idle_timer: nil}
   end
 
+  # Force binary to valid UTF-8 by replacing ALL invalid byte sequences with U+FFFD.
+  # Prevents Jason.EncodeError when LiveView sends state diffs over WebSocket.
+  defp sanitize_utf8(text) when is_binary(text) do
+    do_sanitize_utf8(text, <<>>)
+  end
+
+  defp sanitize_utf8(other), do: to_string(other)
+
+  defp do_sanitize_utf8(<<>>, acc), do: acc
+
+  defp do_sanitize_utf8(text, acc) do
+    case :unicode.characters_to_binary(text, :utf8) do
+      valid when is_binary(valid) ->
+        acc <> valid
+
+      {:error, valid, rest} ->
+        # Skip one invalid byte and continue
+        <<_bad, remaining::binary>> = rest
+        do_sanitize_utf8(remaining, acc <> valid <> "\uFFFD")
+
+      {:incomplete, valid, _rest} ->
+        acc <> valid <> "\uFFFD"
+    end
+  end
+
+  defp sanitize_state(state) do
+    clean_activity =
+      Enum.map(state.activity, fn entry ->
+        %{entry | text: sanitize_utf8(Map.get(entry, :text, ""))}
+      end)
+
+    %{state | idle_timer: nil, activity: clean_activity}
+  end
+
   defp broadcast_ui_update(state) do
-    # Don't include the timer ref in the broadcast — it's not serializable
-    clean_state = %{state | idle_timer: nil}
+    clean_state = sanitize_state(state)
     IO.puts("[SAM] #{state.session_id} status=#{state.status}")
 
     Phoenix.PubSub.broadcast(

@@ -165,16 +165,46 @@ defmodule SamWeb.DashboardLive do
 
   defp format_uptime(_), do: "00:00:00"
 
-  defp agent_activity_text(%{activity: [latest | _]}), do: latest.text
+  defp agent_activity_text(%{activity: [latest | _]}), do: sanitize_text(latest.text)
 
   defp agent_activity_text(%{summary: summary}) when is_binary(summary) and summary != "",
-    do: summary
+    do: sanitize_text(summary)
 
   defp agent_activity_text(_), do: "Awaiting directives"
 
   defp activity_msg_class(%{type: :system}), do: "system"
   defp activity_msg_class(%{type: :agent_event}), do: "agent-event"
   defp activity_msg_class(_), do: ""
+
+  # Strip terminal control chars and block drawing chars from raw PTY summary output.
+  # Ensures valid UTF-8 first to prevent crashes in String.replace.
+  defp sanitize_text(text) when is_binary(text) do
+    text
+    |> ensure_valid_utf8()
+    |> String.replace(~r/[\x00-\x1F\x7F]/u, "")
+    |> String.replace(~r/[▐▛▜▌▝▘▞▚▙▟▗▖▊▋▍▎▏█▓▒░⏵⏴◐◑]/u, "")
+    |> String.trim()
+    |> case do
+      "" -> "Processing..."
+      s -> String.slice(s, 0, 80)
+    end
+  end
+
+  defp sanitize_text(_), do: "Processing..."
+
+  defp ensure_valid_utf8(text) do
+    if String.valid?(text), do: text, else: do_ensure_valid_utf8(text, <<>>)
+  end
+
+  defp do_ensure_valid_utf8(<<>>, acc), do: acc
+
+  defp do_ensure_valid_utf8(text, acc) do
+    case :unicode.characters_to_binary(text, :utf8) do
+      valid when is_binary(valid) -> acc <> valid
+      {:error, valid, <<_bad, rest::binary>>} -> do_ensure_valid_utf8(rest, acc <> valid)
+      {:incomplete, valid, _rest} -> acc <> valid
+    end
+  end
 
   @impl true
   def render(assigns) do
@@ -281,7 +311,7 @@ defmodule SamWeb.DashboardLive do
                 {state.status |> to_string() |> String.upcase()}
               </div>
               <span class="sam-status-meta">
-                {state[:workdir] || "~"} &bull; {state[:branch] || "no branch"} &bull; {format_uptime(
+                {Map.get(state, :workdir) || "~"} &bull; {Map.get(state, :branch) || "no branch"} &bull; {format_uptime(
                   state
                 )}
               </span>
@@ -338,13 +368,25 @@ defmodule SamWeb.DashboardLive do
           <div class="sam-terminal-indicator">
             <span class="live-dot"></span> VIEWING: main <span class="live-label">&#9654; LIVE</span>
           </div>
-          <div
-            class="sam-terminal-body"
-            id="terminal-container"
-            phx-hook="Terminal"
-            data-session-id={@selected_session}
-          >
-          </div>
+          <%= if @selected_session do %>
+            <div
+              class="sam-terminal-body"
+              id={"terminal-#{@selected_session}"}
+              phx-hook="Terminal"
+              phx-update="ignore"
+              data-session-id={@selected_session}
+            >
+            </div>
+          <% else %>
+            <div
+              class="sam-terminal-body"
+              style="display: flex; align-items: center; justify-content: center;"
+            >
+              <span style="color: var(--outline); font-family: var(--font-mono);">
+                No session selected
+              </span>
+            </div>
+          <% end %>
         </div>
 
         <%!-- ACTIVITY FEED (4 cols, top right) --%>
@@ -358,11 +400,11 @@ defmodule SamWeb.DashboardLive do
               <% state = selected_state(@sessions, @selected_session) %>
               <%= if state do %>
                 <div
-                  :for={item <- Enum.take(state[:activity] || [], 50)}
+                  :for={item <- Enum.take(Map.get(state, :activity, []), 50)}
                   class="activity-item"
                 >
                   <span class="time">{format_time(item.timestamp)}</span>
-                  <span class={"msg #{activity_msg_class(item)}"}>{item.text}</span>
+                  <span class={"msg #{activity_msg_class(item)}"}>{sanitize_text(item.text)}</span>
                 </div>
               <% end %>
             <% end %>
@@ -409,7 +451,7 @@ defmodule SamWeb.DashboardLive do
 
       <%!-- SESSION CREATION MODAL --%>
       <%= if @show_new_dialog do %>
-        <div class="modal-overlay" phx-click="toggle_new_dialog">
+        <div class="modal-overlay">
           <section class="modal-panel" phx-click-away="toggle_new_dialog">
             <div class="modal-grid-bg"></div>
             <div class="modal-scan"></div>
