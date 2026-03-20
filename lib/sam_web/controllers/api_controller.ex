@@ -3,6 +3,7 @@ defmodule SamWeb.ApiController do
 
   def health(conn, _params) do
     sessions = Sam.Session.Server.list_sessions()
+
     json(conn, %{
       status: "ok",
       session_count: length(sessions),
@@ -11,17 +12,20 @@ defmodule SamWeb.ApiController do
   end
 
   def sessions(conn, _params) do
-    sessions = Sam.Session.Server.list_sessions()
-    |> Enum.map(fn id ->
-      state = Sam.Session.Server.get_state(id)
-      %{
-        session_id: state.session_id,
-        name: state.name,
-        status: state.status,
-        agent_type: state.agent_type,
-        activity_count: length(state.activity)
-      }
-    end)
+    sessions =
+      Sam.Session.Server.list_sessions()
+      |> Enum.map(fn id ->
+        state = Sam.Session.Server.get_state(id)
+
+        %{
+          session_id: state.session_id,
+          name: state.name,
+          status: state.status,
+          agent_type: state.agent_type,
+          activity_count: length(state.activity)
+        }
+      end)
+
     json(conn, %{sessions: sessions})
   end
 end

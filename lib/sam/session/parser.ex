@@ -32,6 +32,7 @@ defmodule Sam.Session.Parser do
 
   def input_needed?(text) do
     stripped = strip_ansi(text)
+
     patterns = [
       ~r/\?\s+Allow/i,
       ~r/\[y\/N\]/i,
@@ -42,6 +43,7 @@ defmodule Sam.Session.Parser do
       ~r/[Cc]ontinue\?/,
       ~r/[Pp]roceed\?/
     ]
+
     Enum.any?(patterns, &Regex.match?(&1, stripped))
   end
 
@@ -69,10 +71,11 @@ defmodule Sam.Session.Parser do
     session_id = Map.fetch!(opts, :session_id)
     Phoenix.PubSub.subscribe(Sam.PubSub, "session:#{session_id}")
 
-    {:ok, %__MODULE__{
-      session_id: session_id,
-      quiescence_ms: Map.get(opts, :quiescence_ms, @default_quiescence_ms)
-    }}
+    {:ok,
+     %__MODULE__{
+       session_id: session_id,
+       quiescence_ms: Map.get(opts, :quiescence_ms, @default_quiescence_ms)
+     }}
   end
 
   @impl true
@@ -132,12 +135,14 @@ defmodule Sam.Session.Parser do
     Phoenix.PubSub.broadcast(
       Sam.PubSub,
       "session:#{state.session_id}",
-      {:parser_event, state.session_id, %{
-        type: :activity,
-        lines: state.buffer,
-        timestamp: DateTime.utc_now()
-      }}
+      {:parser_event, state.session_id,
+       %{
+         type: :activity,
+         lines: state.buffer,
+         timestamp: DateTime.utc_now()
+       }}
     )
+
     %{state | buffer: []}
   end
 

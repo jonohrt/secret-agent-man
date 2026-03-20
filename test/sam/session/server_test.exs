@@ -8,12 +8,13 @@ defmodule Sam.Session.ServerTest do
       Phoenix.PubSub.subscribe(Sam.PubSub, "sessions:ui")
       Phoenix.PubSub.subscribe(Sam.PubSub, "session:#{session_id}")
 
-      {:ok, _sup_pid} = Sam.Session.GroupSupervisor.start_session(%{
-        session_id: session_id,
-        command: ["/bin/bash", "-l"],
-        agent_type: :generic,
-        name: "Test Session"
-      })
+      {:ok, _sup_pid} =
+        Sam.Session.GroupSupervisor.start_session(%{
+          session_id: session_id,
+          command: ["/bin/bash", "-l"],
+          agent_type: :generic,
+          name: "Test Session"
+        })
 
       # Session should be registered and retrievable
       state = Sam.Session.Server.get_state(session_id)

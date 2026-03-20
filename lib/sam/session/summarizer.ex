@@ -19,10 +19,11 @@ defmodule Sam.Session.Summarizer do
     session_id = Map.fetch!(opts, :session_id)
     Phoenix.PubSub.subscribe(Sam.PubSub, "session:#{session_id}")
 
-    {:ok, %__MODULE__{
-      session_id: session_id,
-      debounce_ms: Map.get(opts, :debounce_ms, @default_debounce_ms)
-    }}
+    {:ok,
+     %__MODULE__{
+       session_id: session_id,
+       debounce_ms: Map.get(opts, :debounce_ms, @default_debounce_ms)
+     }}
   end
 
   # Receive parser events via PubSub
@@ -75,7 +76,9 @@ defmodule Sam.Session.Summarizer do
       |> Enum.filter(fn line ->
         # Drop lines that are just whitespace, single chars, or terminal noise
         trimmed = String.trim(line)
-        String.length(trimmed) > 3 and not String.match?(trimmed, ~r/^[\s│|─┌┐└┘├┤┬┴┼╭╮╰╯═║╔╗╚╝╠╣╦╩╬\-\+\*]+$/)
+
+        String.length(trimmed) > 3 and
+          not String.match?(trimmed, ~r/^[\s│|─┌┐└┘├┤┬┴┼╭╮╰╯═║╔╗╚╝╠╣╦╩╬\-\+\*]+$/)
       end)
       |> Enum.uniq()
 
@@ -83,24 +86,31 @@ defmodule Sam.Session.Summarizer do
       # Nothing meaningful to summarize
       state
     else
-      summary = case Sam.LLM.Client.summarize(all_lines) do
-        {:ok, text} -> text
-        {:error, _} -> Enum.join(all_lines, " | ")
-      end
+      summary =
+        case Sam.LLM.Client.summarize(all_lines) do
+          {:ok, text} -> text
+          {:error, _} -> Enum.join(all_lines, " | ")
+        end
 
       summary = sanitize_text(summary)
 
-      Phoenix.PubSub.broadcast(Sam.PubSub, "session:#{state.session_id}", {:summary, state.session_id, %{
-        summary: summary,
-        raw_events: state.buffer,
-        timestamp: DateTime.utc_now()
-      }})
+      Phoenix.PubSub.broadcast(
+        Sam.PubSub,
+        "session:#{state.session_id}",
+        {:summary, state.session_id,
+         %{
+           summary: summary,
+           raw_events: state.buffer,
+           timestamp: DateTime.utc_now()
+         }}
+      )
 
       %{state | buffer: []}
     end
   end
 
   defp cancel_timer(%{timer_ref: nil} = state), do: state
+
   defp cancel_timer(%{timer_ref: ref} = state) do
     Process.cancel_timer(ref)
     %{state | timer_ref: nil}
@@ -108,12 +118,16 @@ defmodule Sam.Session.Summarizer do
 
   defp sanitize_text(text) when is_binary(text) do
     text
-    |> String.replace(~r/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/, "")  # strip control chars except \n \r \t
-    |> String.replace(~r/\r\n?/, "\n")                               # normalize line endings
-    |> String.replace(~r/\n{3,}/, "\n\n")                            # collapse blank lines
+    # strip control chars except \n \r \t
+    |> String.replace(~r/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/, "")
+    # normalize line endings
+    |> String.replace(~r/\r\n?/, "\n")
+    # collapse blank lines
+    |> String.replace(~r/\n{3,}/, "\n\n")
     |> String.trim()
     |> ensure_valid_utf8()
   end
+
   defp sanitize_text(_), do: ""
 
   defp ensure_valid_utf8(text) do

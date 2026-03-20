@@ -37,25 +37,30 @@ defmodule Sam.Session.PTY do
     # Subscribe to input commands from Session.Server
     Phoenix.PubSub.subscribe(Sam.PubSub, "session_input:#{session_id}")
 
-    port = Port.open({:spawn_executable, pty_port_path()}, [
-      :binary, :exit_status, {:packet, 4}
-    ])
+    port =
+      Port.open({:spawn_executable, pty_port_path()}, [
+        :binary,
+        :exit_status,
+        {:packet, 4}
+      ])
 
-    spawn_msg = Jason.encode!(%{
-      cmd: "spawn",
-      args: command,
-      rows: rows,
-      cols: cols,
-      workdir: workdir
-    })
+    spawn_msg =
+      Jason.encode!(%{
+        cmd: "spawn",
+        args: command,
+        rows: rows,
+        cols: cols,
+        workdir: workdir
+      })
 
     Port.command(port, spawn_msg)
 
-    {:ok, %__MODULE__{
-      port: port,
-      session_id: session_id,
-      workdir: workdir
-    }}
+    {:ok,
+     %__MODULE__{
+       port: port,
+       session_id: session_id,
+       workdir: workdir
+     }}
   end
 
   # Cast handlers for direct PID-based calls
@@ -109,7 +114,12 @@ defmodule Sam.Session.PTY do
         {:noreply, state}
 
       {:ok, %{"event" => "exit", "code" => code}} ->
-        Phoenix.PubSub.broadcast(Sam.PubSub, "session:#{state.session_id}", {:pty_exit, state.session_id, code})
+        Phoenix.PubSub.broadcast(
+          Sam.PubSub,
+          "session:#{state.session_id}",
+          {:pty_exit, state.session_id, code}
+        )
+
         {:stop, :normal, state}
 
       {:ok, %{"event" => "error", "msg" => msg}} ->
@@ -118,14 +128,24 @@ defmodule Sam.Session.PTY do
 
       _ ->
         # Raw PTY output → broadcast
-        Phoenix.PubSub.broadcast(Sam.PubSub, "session:#{state.session_id}", {:pty_output, state.session_id, data})
+        Phoenix.PubSub.broadcast(
+          Sam.PubSub,
+          "session:#{state.session_id}",
+          {:pty_output, state.session_id, data}
+        )
+
         {:noreply, state}
     end
   end
 
   @impl true
   def handle_info({port, {:exit_status, status}}, %{port: port} = state) do
-    Phoenix.PubSub.broadcast(Sam.PubSub, "session:#{state.session_id}", {:pty_exit, state.session_id, status})
+    Phoenix.PubSub.broadcast(
+      Sam.PubSub,
+      "session:#{state.session_id}",
+      {:pty_exit, state.session_id, status}
+    )
+
     {:stop, :normal, state}
   end
 end

@@ -101,6 +101,7 @@ defmodule SamWeb.DashboardLive do
       activity: new_state.activity,
       agents: new_state.agents
     }
+
     sessions = Map.put(socket.assigns.sessions, session_id, session_map)
     # Bump a counter to force LiveView to re-diff the template
     tick = Map.get(socket.assigns, :tick, 0) + 1
@@ -114,6 +115,7 @@ defmodule SamWeb.DashboardLive do
     |> Enum.reduce(%{}, fn id, acc ->
       try do
         state = Sam.Session.Server.get_state(id)
+
         session_map = %{
           session_id: state.session_id,
           name: state.name,
@@ -124,6 +126,7 @@ defmodule SamWeb.DashboardLive do
           activity: state.activity,
           agents: state.agents
         }
+
         Map.put(acc, id, session_map)
       rescue
         _ -> acc
@@ -180,16 +183,28 @@ defmodule SamWeb.DashboardLive do
       <%!-- TOP NAV --%>
       <nav class="sam-topnav">
         <div class="sam-logo">
-          <svg viewBox="0 0 28 28" width="24" height="24" fill="none" xmlns="http://www.w3.org/2000/svg">
-            <circle cx="14" cy="14" r="12" stroke="#afc9ea" stroke-width="0.8" opacity="0.3"/>
-            <line x1="14" y1="2" x2="14" y2="7" stroke="#afc9ea" stroke-width="0.8" opacity="0.4"/>
-            <line x1="14" y1="21" x2="14" y2="26" stroke="#afc9ea" stroke-width="0.8" opacity="0.4"/>
-            <line x1="2" y1="14" x2="7" y2="14" stroke="#afc9ea" stroke-width="0.8" opacity="0.4"/>
-            <line x1="21" y1="14" x2="26" y2="14" stroke="#afc9ea" stroke-width="0.8" opacity="0.4"/>
-            <circle cx="14" cy="14" r="6" stroke="#22c55e" stroke-width="1.2" opacity="0.7"/>
-            <circle cx="14" cy="12" r="2.5" fill="#afc9ea" opacity="0.85"/>
-            <path d="M10 19.5 C10 16.5 18 16.5 18 19.5" fill="#afc9ea" opacity="0.6"/>
-            <path d="M10.5 12 L17.5 12 L16.5 10.5 Q14 9 11.5 10.5 Z" fill="#132030" stroke="#afc9ea" stroke-width="0.4" opacity="0.85"/>
+          <svg
+            viewBox="0 0 28 28"
+            width="24"
+            height="24"
+            fill="none"
+            xmlns="http://www.w3.org/2000/svg"
+          >
+            <circle cx="14" cy="14" r="12" stroke="#afc9ea" stroke-width="0.8" opacity="0.3" />
+            <line x1="14" y1="2" x2="14" y2="7" stroke="#afc9ea" stroke-width="0.8" opacity="0.4" />
+            <line x1="14" y1="21" x2="14" y2="26" stroke="#afc9ea" stroke-width="0.8" opacity="0.4" />
+            <line x1="2" y1="14" x2="7" y2="14" stroke="#afc9ea" stroke-width="0.8" opacity="0.4" />
+            <line x1="21" y1="14" x2="26" y2="14" stroke="#afc9ea" stroke-width="0.8" opacity="0.4" />
+            <circle cx="14" cy="14" r="6" stroke="#22c55e" stroke-width="1.2" opacity="0.7" />
+            <circle cx="14" cy="12" r="2.5" fill="#afc9ea" opacity="0.85" />
+            <path d="M10 19.5 C10 16.5 18 16.5 18 19.5" fill="#afc9ea" opacity="0.6" />
+            <path
+              d="M10.5 12 L17.5 12 L16.5 10.5 Q14 9 11.5 10.5 Z"
+              fill="#132030"
+              stroke="#afc9ea"
+              stroke-width="0.4"
+              opacity="0.85"
+            />
           </svg>
           <div class="sam-logo-text">
             <div class="sam-logo-main">
@@ -200,16 +215,38 @@ defmodule SamWeb.DashboardLive do
         </div>
         <div class="sam-topnav-actions">
           <button class="sam-topnav-btn">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-              <circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+            <svg
+              width="14"
+              height="14"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.8"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            >
+              <circle cx="12" cy="12" r="3" /><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
             </svg>
             SETTINGS
           </button>
           <button class="sam-topnav-btn danger">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-              <circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/>
-              <line x1="12" y1="2" x2="12" y2="6"/><line x1="12" y1="18" x2="12" y2="22"/>
-              <line x1="2" y1="12" x2="6" y2="12"/><line x1="18" y1="12" x2="22" y2="12"/>
+            <svg
+              width="14"
+              height="14"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.8"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            >
+              <circle cx="12" cy="12" r="10" /><circle cx="12" cy="12" r="6" /><circle
+                cx="12"
+                cy="12"
+                r="2"
+              />
+              <line x1="12" y1="2" x2="12" y2="6" /><line x1="12" y1="18" x2="12" y2="22" />
+              <line x1="2" y1="12" x2="6" y2="12" /><line x1="18" y1="12" x2="22" y2="12" />
             </svg>
             KILL ALL
           </button>
@@ -244,7 +281,9 @@ defmodule SamWeb.DashboardLive do
                 {state.status |> to_string() |> String.upcase()}
               </div>
               <span class="sam-status-meta">
-                {state[:workdir] || "~"} &bull; {state[:branch] || "no branch"} &bull; {format_uptime(state)}
+                {state[:workdir] || "~"} &bull; {state[:branch] || "no branch"} &bull; {format_uptime(
+                  state
+                )}
               </span>
             </div>
             <div class="sam-status-actions">
@@ -257,15 +296,33 @@ defmodule SamWeb.DashboardLive do
                     placeholder="Enter response..."
                     autofocus
                   />
-                  <button type="button" class="sam-quick-btn" phx-click="quick_respond" phx-value-response="yes">YES</button>
-                  <button type="button" class="sam-quick-btn" phx-click="quick_respond" phx-value-response="no">NO</button>
+                  <button
+                    type="button"
+                    class="sam-quick-btn"
+                    phx-click="quick_respond"
+                    phx-value-response="yes"
+                  >
+                    YES
+                  </button>
+                  <button
+                    type="button"
+                    class="sam-quick-btn"
+                    phx-click="quick_respond"
+                    phx-value-response="no"
+                  >
+                    NO
+                  </button>
                   <button type="submit" class="sam-btn-outline">SEND</button>
                 </form>
               <% else %>
                 <button class="sam-btn-outline" phx-click="toggle_terminal">
                   {if @show_terminal, do: "HIDE TTY", else: "SHOW TTY"}
                 </button>
-                <button class="sam-btn-outline danger" phx-click="kill_session" phx-value-id={@selected_session}>
+                <button
+                  class="sam-btn-outline danger"
+                  phx-click="kill_session"
+                  phx-value-id={@selected_session}
+                >
                   TERMINATE
                 </button>
               <% end %>
@@ -279,11 +336,14 @@ defmodule SamWeb.DashboardLive do
         <%!-- TERMINAL (8 cols, spans 2 rows) --%>
         <div class="sam-panel sam-terminal">
           <div class="sam-terminal-indicator">
-            <span class="live-dot"></span>
-            VIEWING: main
-            <span class="live-label">&#9654; LIVE</span>
+            <span class="live-dot"></span> VIEWING: main <span class="live-label">&#9654; LIVE</span>
           </div>
-          <div class="sam-terminal-body" id="terminal-container" phx-hook="Terminal" data-session-id={@selected_session}>
+          <div
+            class="sam-terminal-body"
+            id="terminal-container"
+            phx-hook="Terminal"
+            data-session-id={@selected_session}
+          >
           </div>
         </div>
 
@@ -324,7 +384,9 @@ defmodule SamWeb.DashboardLive do
                     <span class={"status-dot #{status_class(state.status)}"}></span>
                     <span class="agent-name">main</span>
                     <span class="agent-badge">PRIMARY</span>
-                    <span class={"agent-status #{status_class(state.status)}"}>{state.status |> to_string() |> String.upcase()}</span>
+                    <span class={"agent-status #{status_class(state.status)}"}>
+                      {state.status |> to_string() |> String.upcase()}
+                    </span>
                   </div>
                   <div class="agent-activity">
                     {agent_activity_text(state)}
@@ -362,7 +424,13 @@ defmodule SamWeb.DashboardLive do
               <form phx-submit="create_session">
                 <div class="modal-field">
                   <label class="modal-label">SESSION_IDENTITY</label>
-                  <input class="modal-input" type="text" name="name" placeholder="ENTER OPERATION CODENAME..." required />
+                  <input
+                    class="modal-input"
+                    type="text"
+                    name="name"
+                    placeholder="ENTER OPERATION CODENAME..."
+                    required
+                  />
                 </div>
 
                 <div class="modal-input-row">
@@ -374,13 +442,24 @@ defmodule SamWeb.DashboardLive do
                   </div>
                   <div class="modal-field">
                     <label class="modal-label">DEPLOYMENT_VECTOR</label>
-                    <input class="modal-input" type="text" name="workdir" placeholder="/ROOT/PROJECTS/..." style="font-family: var(--font-mono); font-size: 10px;" />
+                    <input
+                      class="modal-input"
+                      type="text"
+                      name="workdir"
+                      placeholder="/ROOT/PROJECTS/..."
+                      style="font-family: var(--font-mono); font-size: 10px;"
+                    />
                   </div>
                 </div>
 
                 <div class="modal-field">
                   <label class="modal-label">INITIAL_DIRECTIVES</label>
-                  <textarea class="modal-textarea" name="prompt" rows="3" placeholder="DESCRIBE THE TARGET ARCHITECTURE AND OBJECTIVES..."></textarea>
+                  <textarea
+                    class="modal-textarea"
+                    name="prompt"
+                    rows="3"
+                    placeholder="DESCRIBE THE TARGET ARCHITECTURE AND OBJECTIVES..."
+                  ></textarea>
                 </div>
 
                 <div class="modal-footer">
@@ -389,7 +468,7 @@ defmodule SamWeb.DashboardLive do
                   </button>
                   <div style="display: flex; align-items: center; gap: 12px;">
                     <div class="modal-auth">
-                      AUTHORIZATION_REQUIRED<br/>
+                      AUTHORIZATION_REQUIRED<br />
                       <span style="color: rgba(175,201,234,0.5);">LVL_07_ACCESS_GRANTED</span>
                     </div>
                     <button type="submit" class="modal-submit">

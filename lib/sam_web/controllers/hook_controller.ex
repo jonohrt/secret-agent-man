@@ -8,6 +8,7 @@ defmodule SamWeb.HookController do
       [{_pid, _}] ->
         Sam.Session.Server.push_hook_event(session_id, params)
         json(conn, %{status: "ok"})
+
       [] ->
         conn |> put_status(404) |> json(%{error: "session not found"})
     end

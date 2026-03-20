@@ -11,7 +11,7 @@ defmodule Sam.Persistence do
   @impl true
   def init(_) do
     dets_path = Path.join(data_dir(), "sam_sessions") |> to_charlist()
-    {:ok, table} = :dets.open_file(:sam_persistence, [file: dets_path, type: :set])
+    {:ok, table} = :dets.open_file(:sam_persistence, file: dets_path, type: :set)
     schedule_flush()
     {:ok, %{table: table}}
   end
@@ -31,9 +31,11 @@ defmodule Sam.Persistence do
 
   defp flush_sessions(table) do
     sessions = Sam.Session.Server.list_sessions()
+
     Enum.each(sessions, fn id ->
       try do
         state = Sam.Session.Server.get_state(id)
+
         serializable = %{
           session_id: state.session_id,
           name: state.name,
@@ -41,6 +43,7 @@ defmodule Sam.Persistence do
           agent_type: state.agent_type,
           activity: Enum.take(state.activity, 50)
         }
+
         :dets.insert(table, {id, serializable})
       rescue
         _ -> :ok

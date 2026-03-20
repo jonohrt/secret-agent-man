@@ -4,13 +4,15 @@ defmodule SamWeb.DashboardLiveTest do
 
   test "renders empty dashboard", %{conn: conn} do
     {:ok, _view, html} = live(conn, "/")
-    assert html =~ "+"
-    assert html =~ "Select or create a session" || html =~ "No active agents" || html =~ "Activity"
+    assert html =~ "DEPLOY AGENT"
+    assert html =~ "ACTIVITY FEED"
+    assert html =~ "AGENTS"
   end
 
   test "opens new session dialog", %{conn: conn} do
     {:ok, view, _html} = live(conn, "/")
-    view |> element(".tab-new-btn") |> render_click()
-    assert render(view) =~ "New Session" || render(view) =~ "new-session" || render(view) =~ "Agent"
+    view |> element(".sam-btn-deploy") |> render_click()
+
+    assert render(view) =~ "New Operation" || render(view) =~ "DEPLOY"
   end
 end

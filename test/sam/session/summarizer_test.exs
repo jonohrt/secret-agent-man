@@ -5,10 +5,11 @@ defmodule Sam.Session.SummarizerTest do
     test "buffers events and produces summaries on decision points" do
       Phoenix.PubSub.subscribe(Sam.PubSub, "session:test-sum-1")
 
-      {:ok, pid} = Sam.Session.Summarizer.start_link(%{
-        session_id: "test-sum-1",
-        debounce_ms: 50
-      })
+      {:ok, pid} =
+        Sam.Session.Summarizer.start_link(%{
+          session_id: "test-sum-1",
+          debounce_ms: 50
+        })
 
       # Push activity events
       Sam.Session.Summarizer.push_event(pid, %{
@@ -34,10 +35,11 @@ defmodule Sam.Session.SummarizerTest do
     test "without API key, falls back to joining lines" do
       Phoenix.PubSub.subscribe(Sam.PubSub, "session:test-sum-2")
 
-      {:ok, pid} = Sam.Session.Summarizer.start_link(%{
-        session_id: "test-sum-2",
-        debounce_ms: 50
-      })
+      {:ok, pid} =
+        Sam.Session.Summarizer.start_link(%{
+          session_id: "test-sum-2",
+          debounce_ms: 50
+        })
 
       Sam.Session.Summarizer.push_event(pid, %{
         type: :activity,

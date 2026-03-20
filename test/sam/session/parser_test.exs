@@ -47,6 +47,7 @@ defmodule Sam.Session.ParserTest do
         "file" => "src/auth.ts",
         "session_id" => "abc"
       }
+
       parsed = Parser.parse_hook_event(event)
       assert parsed.type == :tool_call
       assert parsed.tool == "Edit"

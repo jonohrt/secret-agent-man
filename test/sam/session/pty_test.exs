@@ -5,10 +5,11 @@ defmodule Sam.Session.PTYTest do
     test "spawns a shell and receives output via PubSub" do
       Phoenix.PubSub.subscribe(Sam.PubSub, "session:test-pty-1")
 
-      {:ok, pid} = Sam.Session.PTY.start_link(%{
-        command: ["/bin/bash", "-l"],
-        session_id: "test-pty-1"
-      })
+      {:ok, pid} =
+        Sam.Session.PTY.start_link(%{
+          command: ["/bin/bash", "-l"],
+          session_id: "test-pty-1"
+        })
 
       Sam.Session.PTY.send_input(pid, "echo sam_test_marker\n")
 
@@ -21,10 +22,11 @@ defmodule Sam.Session.PTYTest do
 
   describe "resize/3" do
     test "sends resize command without crashing" do
-      {:ok, pid} = Sam.Session.PTY.start_link(%{
-        command: ["/bin/bash", "-l"],
-        session_id: "test-pty-2"
-      })
+      {:ok, pid} =
+        Sam.Session.PTY.start_link(%{
+          command: ["/bin/bash", "-l"],
+          session_id: "test-pty-2"
+        })
 
       assert :ok = Sam.Session.PTY.resize(pid, 120, 40)
       # Give it a moment, then verify process is still alive
@@ -43,6 +45,7 @@ defmodule Sam.Session.PTYTest do
     receive do
       {:pty_output, _, data} ->
         acc = acc <> data
+
         if String.contains?(acc, marker) do
           :ok
         else

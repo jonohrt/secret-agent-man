@@ -5,7 +5,12 @@ defmodule Sam.Session.Server do
   @idle_timeout_ms 1_000
 
   defstruct [
-    :session_id, :name, :agent_type, :branch, :workdir, :idle_timer,
+    :session_id,
+    :name,
+    :agent_type,
+    :branch,
+    :workdir,
+    :idle_timer,
     status: :starting,
     activity: [],
     agents: []
@@ -76,7 +81,12 @@ defmodule Sam.Session.Server do
 
   @impl true
   def handle_cast({:resize, cols, rows}, state) do
-    Phoenix.PubSub.broadcast(Sam.PubSub, "session_input:#{state.session_id}", {:resize, cols, rows})
+    Phoenix.PubSub.broadcast(
+      Sam.PubSub,
+      "session_input:#{state.session_id}",
+      {:resize, cols, rows}
+    )
+
     {:noreply, state}
   end
 
@@ -88,8 +98,12 @@ defmodule Sam.Session.Server do
 
   @impl true
   def handle_cast({:hook_event, event}, state) do
-    Phoenix.PubSub.broadcast(Sam.PubSub, "session:#{state.session_id}",
-      {:parser_event, state.session_id, Sam.Session.Parser.parse_hook_event(event)})
+    Phoenix.PubSub.broadcast(
+      Sam.PubSub,
+      "session:#{state.session_id}",
+      {:parser_event, state.session_id, Sam.Session.Parser.parse_hook_event(event)}
+    )
+
     {:noreply, state}
   end
 
@@ -128,6 +142,7 @@ defmodule Sam.Session.Server do
       text: summary.summary,
       timestamp: summary.timestamp
     }
+
     activity = [entry | state.activity] |> Enum.take(100)
     state = %{state | activity: activity}
     broadcast_ui_update(state)
@@ -168,6 +183,7 @@ defmodule Sam.Session.Server do
   ## Private helpers
 
   defp cancel_idle_timer(%{idle_timer: nil} = state), do: state
+
   defp cancel_idle_timer(%{idle_timer: ref} = state) do
     Process.cancel_timer(ref)
     %{state | idle_timer: nil}
@@ -177,6 +193,11 @@ defmodule Sam.Session.Server do
     # Don't include the timer ref in the broadcast — it's not serializable
     clean_state = %{state | idle_timer: nil}
     IO.puts("[SAM] #{state.session_id} status=#{state.status}")
-    Phoenix.PubSub.broadcast(Sam.PubSub, "sessions:ui", {:session_update, state.session_id, clean_state})
+
+    Phoenix.PubSub.broadcast(
+      Sam.PubSub,
+      "sessions:ui",
+      {:session_update, state.session_id, clean_state}
+    )
   end
 end

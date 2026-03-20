@@ -7,25 +7,33 @@ defmodule Sam.Hooks.ClaudeCodeHooks do
         case Jason.decode(content) do
           {:ok, settings} ->
             if has_sam_hooks?(settings), do: :already_registered, else: :needs_registration
-          _ -> :error
+
+          _ ->
+            :error
         end
-      {:error, :enoent} -> :no_settings_file
-      {:error, _} -> :error
+
+      {:error, :enoent} ->
+        :no_settings_file
+
+      {:error, _} ->
+        :error
     end
   end
 
   def register_hooks! do
-    content = case File.read(@settings_path) do
-      {:ok, c} -> c
-      {:error, :enoent} -> "{}"
-    end
+    content =
+      case File.read(@settings_path) do
+        {:ok, c} -> c
+        {:error, :enoent} -> "{}"
+      end
 
     settings = Jason.decode!(content)
     hooks = Map.get(settings, "hooks", %{})
 
     sam_hook = %{
       "type" => "command",
-      "command" => "curl -s -X POST http://localhost:4000/api/hooks -H 'Content-Type: application/json' -d '{\"event\":\"$EVENT\",\"session_id\":\"$SESSION_ID\"}'"
+      "command" =>
+        "curl -s -X POST http://localhost:4000/api/hooks -H 'Content-Type: application/json' -d '{\"event\":\"$EVENT\",\"session_id\":\"$SESSION_ID\"}'"
     }
 
     post_tool = Map.get(hooks, "postToolUse", [])

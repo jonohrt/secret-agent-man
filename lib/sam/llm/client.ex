@@ -8,6 +8,7 @@ defmodule Sam.LLM.Client do
       {:ok, Enum.join(lines, " | ")}
     else
       model = Keyword.get(opts, :model, @default_model)
+
       prompt = """
       Summarize what happened in this sequence of AI coding agent actions in one sentence.
       Focus on the outcome, not the process. Be concise.
@@ -23,16 +24,18 @@ defmodule Sam.LLM.Client do
       }
 
       case Req.post("https://api.anthropic.com/v1/messages",
-        json: body,
-        headers: [
-          {"x-api-key", api_key},
-          {"anthropic-version", "2023-06-01"}
-        ]
-      ) do
+             json: body,
+             headers: [
+               {"x-api-key", api_key},
+               {"anthropic-version", "2023-06-01"}
+             ]
+           ) do
         {:ok, %{status: 200, body: %{"content" => [%{"text" => text} | _]}}} ->
           {:ok, String.trim(text)}
+
         {:ok, %{status: status, body: body}} ->
           {:error, "API error #{status}: #{inspect(body)}"}
+
         {:error, reason} ->
           {:error, reason}
       end

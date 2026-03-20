@@ -29,11 +29,15 @@ defmodule Sam.Session.GroupSupervisor do
       },
       %{
         id: Sam.Session.PTY,
-        start: {Sam.Session.PTY, :start_link, [%{
-          session_id: session_id,
-          command: command,
-          workdir: Map.get(opts, :workdir)
-        }]}
+        start:
+          {Sam.Session.PTY, :start_link,
+           [
+             %{
+               session_id: session_id,
+               command: command,
+               workdir: Map.get(opts, :workdir)
+             }
+           ]}
       }
     ]
 
