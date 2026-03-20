@@ -85,6 +85,7 @@ defmodule SamWeb.DashboardLive do
 
   @impl true
   def handle_info({:session_update, session_id, new_state}, socket) do
+    IO.puts("[LV] Received update for #{session_id} status=#{new_state.status}")
     # Convert struct to plain map so LiveView diffing works correctly
     session_map = %{
       session_id: new_state.session_id,
@@ -178,7 +179,7 @@ defmodule SamWeb.DashboardLive do
       <div style="flex: 1; position: relative; display: flex; flex-direction: column; overflow: hidden; min-height: 0;">
         <%!-- Terminal Overlay (Task 9) --%>
         <%= if @show_terminal && @selected_session do %>
-          <div class="terminal-overlay">
+          <div class="terminal-overlay" phx-update="ignore" id="terminal-overlay">
             <div
               id="terminal-container"
               phx-hook="Terminal"
