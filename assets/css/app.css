@@ -122,11 +122,13 @@ body::before {
   background: var(--accent-dim);
 }
 
-.tab .status-dot {
-  width: 6px;
-  height: 6px;
+.status-dot {
+  width: 8px;
+  height: 8px;
   border-radius: 50%;
   flex-shrink: 0;
+  display: inline-block;
+  background: var(--status-idle);
 }
 
 .tab .session-name {
