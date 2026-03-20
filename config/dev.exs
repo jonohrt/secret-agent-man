@@ -1,5 +1,9 @@
 import Config
 
+config :phoenix_live_view,
+  debug_heex_annotations: true,
+  debug_attributes: true
+
 # For development, we disable any cache and enable
 # debugging and code reloading.
 #
