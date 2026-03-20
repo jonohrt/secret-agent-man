@@ -19,13 +19,15 @@ defmodule Sam.Session.TranscriptWatcher do
     workdir = Map.get(opts, :workdir)
     test_path = Map.get(opts, :_test_jsonl_path)
 
+    existing_files = list_existing_jsonl(workdir)
+
     state = %{
       session_id: session_id,
       workdir: workdir,
       path: test_path,
       offset: if(test_path, do: file_size(test_path), else: 0),
       line_buffer: "",
-      started_at: System.os_time(:second)
+      existing_files: existing_files
     }
 
     send(self(), :poll)
@@ -35,7 +37,7 @@ defmodule Sam.Session.TranscriptWatcher do
   @impl true
   def handle_info(:poll, %{path: nil} = state) do
     # Try to find the JSONL file
-    case find_jsonl(state.workdir, state.started_at) do
+    case find_jsonl(state.workdir, state.existing_files) do
       nil ->
         schedule_poll()
         {:noreply, state}
@@ -151,20 +153,29 @@ defmodule Sam.Session.TranscriptWatcher do
 
   defp handle_record(_, _), do: :ok
 
-  defp find_jsonl(workdir, started_at) do
+  defp list_existing_jsonl(workdir) do
     dir = project_dir(workdir)
 
     case File.ls(dir) do
       {:ok, files} ->
         files
         |> Enum.filter(&String.ends_with?(&1, ".jsonl"))
+        |> MapSet.new()
+
+      _ ->
+        MapSet.new()
+    end
+  end
+
+  defp find_jsonl(workdir, existing_files) do
+    dir = project_dir(workdir)
+
+    case File.ls(dir) do
+      {:ok, files} ->
+        files
+        |> Enum.filter(&String.ends_with?(&1, ".jsonl"))
+        |> Enum.reject(&MapSet.member?(existing_files, &1))
         |> Enum.map(&Path.join(dir, &1))
-        |> Enum.filter(fn path ->
-          case File.stat(path, time: :posix) do
-            {:ok, %{mtime: mtime}} -> mtime >= started_at
-            _ -> false
-          end
-        end)
         |> Enum.sort_by(
           fn path ->
             case File.stat(path, time: :posix) do
