@@ -36,3 +36,8 @@ npm-debug.log
 /assets/node_modules/
 
 .superpowers/
+
+# Zig build artifacts
+/zig_src/zig-out/
+/zig_src/.zig-cache/
+/priv/native/pty_port
