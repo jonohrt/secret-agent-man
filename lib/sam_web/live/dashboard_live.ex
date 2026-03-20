@@ -84,8 +84,19 @@ defmodule SamWeb.DashboardLive do
   end
 
   @impl true
-  def handle_info({:session_update, session_id, state}, socket) do
-    sessions = Map.put(socket.assigns.sessions, session_id, state)
+  def handle_info({:session_update, session_id, new_state}, socket) do
+    # Convert struct to plain map so LiveView diffing works correctly
+    session_map = %{
+      session_id: new_state.session_id,
+      name: new_state.name,
+      status: new_state.status,
+      agent_type: new_state.agent_type,
+      branch: new_state.branch,
+      workdir: new_state.workdir,
+      activity: new_state.activity,
+      agents: new_state.agents
+    }
+    sessions = Map.put(socket.assigns.sessions, session_id, session_map)
     {:noreply, assign(socket, sessions: sessions)}
   end
 
@@ -95,7 +106,18 @@ defmodule SamWeb.DashboardLive do
     Sam.Session.Server.list_sessions()
     |> Enum.reduce(%{}, fn id, acc ->
       try do
-        Map.put(acc, id, Sam.Session.Server.get_state(id))
+        state = Sam.Session.Server.get_state(id)
+        session_map = %{
+          session_id: state.session_id,
+          name: state.name,
+          status: state.status,
+          agent_type: state.agent_type,
+          branch: state.branch,
+          workdir: state.workdir,
+          activity: state.activity,
+          agents: state.agents
+        }
+        Map.put(acc, id, session_map)
       rescue
         _ -> acc
       catch
