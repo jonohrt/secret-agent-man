@@ -16,7 +16,8 @@ defmodule SamWeb.DashboardLive do
        selected_session: selected,
        show_new_dialog: false,
        show_terminal: false,
-       input_text: ""
+       input_text: "",
+       tick: 0
      )}
   end
 
@@ -85,8 +86,6 @@ defmodule SamWeb.DashboardLive do
 
   @impl true
   def handle_info({:session_update, session_id, new_state}, socket) do
-    IO.puts("[LV] Received update for #{session_id} status=#{new_state.status}")
-    # Convert struct to plain map so LiveView diffing works correctly
     session_map = %{
       session_id: new_state.session_id,
       name: new_state.name,
@@ -98,7 +97,9 @@ defmodule SamWeb.DashboardLive do
       agents: new_state.agents
     }
     sessions = Map.put(socket.assigns.sessions, session_id, session_map)
-    {:noreply, assign(socket, sessions: sessions)}
+    # Bump a counter to force LiveView to re-diff the template
+    tick = Map.get(socket.assigns, :tick, 0) + 1
+    {:noreply, assign(socket, sessions: sessions, tick: tick)}
   end
 
   # -- Helpers --
@@ -292,7 +293,7 @@ defmodule SamWeb.DashboardLive do
           </div>
         </div>
       <% end %>
-      <div class="theme-switcher">Ctrl+T to switch theme</div>
+      <div class="theme-switcher" data-tick={@tick}>Ctrl+T to switch theme</div>
     </div>
     """
   end

@@ -167,21 +167,6 @@ defmodule Sam.Session.Server do
 
   ## Private helpers
 
-  defp set_working(state) do
-    # Only transition and broadcast if status actually changes
-    state = cancel_idle_timer(state)
-    timer = Process.send_after(self(), :idle_timeout, @idle_timeout_ms)
-    new_status = :working
-
-    if state.status != new_status do
-      state = %{state | status: new_status, idle_timer: timer}
-      broadcast_ui_update(state)
-      state
-    else
-      %{state | idle_timer: timer}
-    end
-  end
-
   defp cancel_idle_timer(%{idle_timer: nil} = state), do: state
   defp cancel_idle_timer(%{idle_timer: ref} = state) do
     Process.cancel_timer(ref)
