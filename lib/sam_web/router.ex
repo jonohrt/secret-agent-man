@@ -23,5 +23,7 @@ defmodule SamWeb.Router do
   scope "/api", SamWeb do
     pipe_through :api
     post "/hooks", HookController, :create
+    get "/health", ApiController, :health
+    get "/sessions", ApiController, :sessions
   end
 end
