@@ -104,16 +104,13 @@ defmodule SamWeb.DashboardLive do
     end)
   end
 
-  defp agent_command(:claude_code, _workdir, prompt) do
-    cmd = ["claude", "--dangerously-skip-permissions"]
-    if prompt && prompt != "", do: cmd ++ [prompt], else: cmd
+  defp agent_command(agent_type, workdir, prompt) do
+    adapter = agent_adapter(agent_type)
+    adapter.spawn_command(workdir, prompt)
   end
 
-  defp agent_command(:opencode, _, _), do: ["opencode"]
-  defp agent_command(:codex, _, prompt), do: ["codex", prompt || ""]
-  defp agent_command(:gemini, _, _), do: ["gemini"]
-  defp agent_command(:copilot, _, _), do: ["gh", "copilot"]
-  defp agent_command(_, _, _), do: ["/bin/bash", "-l"]
+  defp agent_adapter(:claude_code), do: Sam.Agents.ClaudeCode
+  defp agent_adapter(_), do: Sam.Agents.Generic
 
   defp selected_state(sessions, selected) do
     if selected, do: Map.get(sessions, selected), else: nil
@@ -269,6 +266,7 @@ defmodule SamWeb.DashboardLive do
           </div>
         </div>
       <% end %>
+      <div class="theme-switcher">Ctrl+T to switch theme</div>
     </div>
     """
   end
