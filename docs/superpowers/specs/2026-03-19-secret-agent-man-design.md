@@ -19,7 +19,7 @@ Single user, single machine, power user running 3-5 concurrent agent sessions.
 - **Backend**: Elixir / Phoenix
 - **Frontend**: Phoenix LiveView (structured views) + xterm.js (terminal embeds)
 - **Process management**: OTP GenServers + Supervisors for session lifecycle
-- **Terminal I/O**: PTY spawning via a small C Port program that calls `forkpty()` — the Port program allocates a real PTY, execs the agent process, and relays I/O to the Elixir VM over stdin/stdout. WebSocket bridge to xterm.js via Phoenix Channels.
+- **Terminal I/O**: PTY spawning via a small Zig Port program — uses `forkpty()` on macOS/Linux and `CreatePseudoConsole` (conpty) on Windows. The Port program allocates a real PTY, execs the agent process, and relays I/O to the Elixir VM over stdin/stdout. WebSocket bridge to xterm.js via Phoenix Channels.
 - **LLM summarization**: Anthropic API (Claude Haiku) via `req` HTTP client
 - **Data**: ETS for live session state + DETS for persistence. Session history (activity feed, summaries) is periodically flushed to DETS so it survives application restarts. On startup, the app checks for orphaned agent processes and reconnects.
 
@@ -45,7 +45,7 @@ Application Supervisor
 ├── SessionSupervisor (DynamicSupervisor)
 │   └── Spawns per-session Supervisors:
 │       └── Session.GroupSupervisor (Supervisor, rest_for_one)
-│           ├── Session.PTY (GenServer) — owns the C Port PTY, raw I/O
+│           ├── Session.PTY (GenServer) — owns the Zig Port PTY, raw I/O
 │           ├── Session.Parser (GenServer) — output parsing, event extraction
 │           ├── Session.Summarizer (GenServer) — LLM summarization
 │           └── Session.Server (GenServer) — lifecycle, state, metadata
@@ -219,7 +219,7 @@ Users can create custom themes by adding CSS files to `~/.config/secret-agent-ma
 
 ### Launched from UI (primary, v1)
 
-User clicks "+", fills out the new session dialog. Backend spawns the agent process in a real PTY via the C Port program, wraps it in the session process group. Full control from the start — hooks registered, output parsed, terminal accessible.
+User clicks "+", fills out the new session dialog. Backend spawns the agent process in a real PTY via the Zig Port program, wraps it in the session process group. Full control from the start — hooks registered, output parsed, terminal accessible.
 
 ### Future: External session attachment (v2, research needed)
 
@@ -248,7 +248,7 @@ Sessions can be manually interrupted (send SIGINT) or killed (SIGTERM) from the 
 ### Shutdown Behavior
 
 - **Browser tab closed**: Agent processes keep running. Dashboard reconnects on next visit.
-- **Phoenix server stopped**: Agent processes spawned via the C Port program receive SIGHUP when the Port closes. The Port program is designed to keep the child alive by default — on restart, the app reads DETS for session metadata and attempts to re-adopt orphaned processes by PID.
+- **Phoenix server stopped**: Agent processes spawned via the Zig Port program receive SIGHUP when the Port closes. The Port program is designed to keep the child alive by default — on restart, the app reads DETS for session metadata and attempts to re-adopt orphaned processes by PID.
 - **Agent process exits**: Session transitions to Done (exit 0) or Error (non-zero). PTY Port detects EOF and notifies Session.Server.
 
 ## ANSI Handling
@@ -274,8 +274,9 @@ This is the standard Phoenix approach for JS dependencies beyond what esbuild al
 
 ```
 secret-agent-man/
-├── c_src/
-│   └── pty_port.c                    # C Port program: forkpty() + I/O relay
+├── zig_src/
+│   ├── pty_port.zig                  # PTY Port: forkpty() (POSIX) / conpty (Windows)
+│   └── build.zig                     # Zig build — cross-compiles to all targets
 ├── lib/
 │   ├── sam/                          # Core application
 │   │   ├── application.ex            # OTP application + supervisor tree
@@ -314,7 +315,7 @@ secret-agent-man/
 │   ├── dev.exs
 │   └── runtime.exs                   # API keys, theme config
 ├── mix.exs
-└── Makefile                          # Compiles c_src/pty_port.c
+└── Makefile                          # Delegates to `zig build` in zig_src/
 ```
 
 Note: Only `claude_code.ex` adapter is listed — other agent adapters (opencode, codex, gemini, copilot) are structurally identical and will be added as needed. No premature files.
@@ -335,13 +336,59 @@ defp deps do
 end
 ```
 
-Minimal dependency set. The C Port program (`pty_port.c`) is compiled via `make` and has no external dependencies beyond POSIX `<pty.h>`.
+Minimal dependency set. The Zig Port program is compiled via `zig build` (called from the Makefile). Zig is the only build-time dependency beyond Elixir — it cross-compiles to macOS (arm64/x86_64), Linux (x86_64/arm64), and Windows (x86_64) from any host.
+
+## Packaging & Distribution
+
+### CLI Command
+
+The binary is `sam`. Running `sam` starts the Phoenix server and opens `localhost:4000` in the default browser.
+
+```bash
+sam              # start dashboard (localhost:4000)
+sam stop         # gracefully stop (agents keep running)
+sam status       # show running sessions summary
+```
+
+### Development
+
+```bash
+cd secret-agent-man
+mix setup        # deps.get + zig build + npm install
+mix phx.server   # starts at localhost:4000
+```
+
+### Release Build (Burrito)
+
+[Burrito](https://github.com/burrito-elixir/burrito) packages the entire BEAM VM + application + pre-compiled Zig Port binary into a single self-extracting executable per platform. No Elixir, Erlang, or Zig install needed on the user's machine.
+
+**Target platforms:**
+- macOS arm64 (Apple Silicon)
+- macOS x86_64 (Intel)
+- Linux x86_64
+- Linux arm64
+- Windows x86_64
+
+**Build matrix:** GitHub Actions CI cross-compiles the Zig Port program for each target, then Burrito wraps each into a standalone binary. All 5 binaries are built from a single CI run (Zig cross-compiles from any host).
+
+### Distribution Channels
+
+1. **GitHub Releases** (primary) — Burrito binaries attached to tagged releases. Users download one file for their platform and run it.
+2. **Homebrew tap** — `brew install sam-hq/tap/sam`. Formula downloads the pre-built Burrito binary (no build-from-source needed).
+3. **Scoop** (Windows) — `scoop install sam` via a Scoop bucket.
+4. **Direct download page** — simple landing page with platform-detect and download button.
+
+### Auto-launch (optional)
+
+- **macOS**: `sam install-service` creates a Launch Agent plist in `~/Library/LaunchAgents/` that starts SAM on login.
+- **Linux**: `sam install-service` creates a systemd user service.
+- **Windows**: `sam install-service` creates a scheduled task that runs on login.
 
 ## Acceptance Verification
 
 ### Automated Checks
 
-1. **PTY spike**: Compile `pty_port.c`, spawn a shell via Elixir Port, send a command, read output — proves the PTY layer works
+1. **PTY spike**: Compile `pty_port.zig`, spawn a shell via Elixir Port, send a command, read output — proves the PTY layer works
 2. **Session spawn**: Launch Claude Code from UI → verify PTY process exists, session appears in tab bar within 2s
 3. **Activity summarization**: Trigger a multi-step agent task → verify activity feed shows summarized entries (not raw tool calls)
 4. **Terminal embed**: Click "Open Terminal" → verify xterm.js connects and shows live agent output, keyboard input reaches the agent
