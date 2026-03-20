@@ -1248,13 +1248,13 @@ The new template structure:
             <form phx-submit="send_input" class="sam-input-inline">
               <input
                 type="text"
-                name="text"
+                name="input"
                 value={@input_text}
                 placeholder="Enter response..."
                 autofocus
               />
-              <button type="button" class="sam-quick-btn" phx-click="quick_respond" phx-value-text="yes">YES</button>
-              <button type="button" class="sam-quick-btn" phx-click="quick_respond" phx-value-text="no">NO</button>
+              <button type="button" class="sam-quick-btn" phx-click="quick_respond" phx-value-response="yes">YES</button>
+              <button type="button" class="sam-quick-btn" phx-click="quick_respond" phx-value-response="no">NO</button>
               <button type="submit" class="sam-btn-outline">SEND</button>
             </form>
           <% else %>
@@ -1401,7 +1401,18 @@ The new template structure:
 </div>
 ```
 
-- [ ] **Step 2: Add helper functions**
+- [ ] **Step 2: Add new event handler and helper functions**
+
+Add a `kill_session` event handler (the TERMINATE button needs it):
+
+```elixir
+def handle_event("kill_session", %{"id" => session_id}, socket) do
+  Sam.Session.Server.stop(session_id)
+  {:noreply, socket}
+end
+```
+
+**Note:** The SETTINGS and KILL ALL buttons in the top nav are intentionally non-functional in v1 — no `phx-click` handlers. They are structural placeholders for future features.
 
 Add these helper functions to `dashboard_live.ex` (near the existing helpers around lines 139-147):
 
@@ -1478,7 +1489,8 @@ Open `http://localhost:4000` and verify the complete flow:
 
 - [ ] **Step 4: Commit any fixes**
 
+Stage only the specific files that were fixed, then commit:
+
 ```bash
-git add -A
 git commit -m "fix: address precommit issues from UI redesign"
 ```
