@@ -1,9 +1,10 @@
-const THEMES = ['tron', 'synthwave', 'phosphor', 'amber']
+const THEMES = ['command']
 const STORAGE_KEY = 'sam-theme'
 
 export function initTheme() {
-  const saved = localStorage.getItem(STORAGE_KEY) || 'tron'
-  applyTheme(saved)
+  const saved = localStorage.getItem(STORAGE_KEY)
+  const theme = THEMES.includes(saved) ? saved : THEMES[0]
+  applyTheme(theme)
 }
 
 export function cycleTheme() {
@@ -15,12 +16,16 @@ export function cycleTheme() {
 }
 
 export function applyTheme(name) {
-  document.body.className = `theme-${name}`
+  document.documentElement.setAttribute('data-theme', name)
   localStorage.setItem(STORAGE_KEY, name)
 }
 
 export function getCurrentTheme() {
-  return localStorage.getItem(STORAGE_KEY) || 'tron'
+  return localStorage.getItem(STORAGE_KEY) || THEMES[0]
+}
+
+export function getThemeCount() {
+  return THEMES.length
 }
 
 document.addEventListener('keydown', (e) => {
