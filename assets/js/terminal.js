@@ -40,7 +40,14 @@ const TerminalHook = {
 
     this.channel = socket.channel(`terminal:${sessionId}`, {})
     this.channel.join()
-      .receive('ok', () => console.log(`Connected to terminal:${sessionId}`))
+      .receive('ok', () => {
+        console.log(`Connected to terminal:${sessionId}`)
+        // Send current terminal size so PTY resizes and redraws
+        const dims = this.fitAddon.proposeDimensions()
+        if (dims) {
+          this.channel.push('resize', { cols: dims.cols, rows: dims.rows })
+        }
+      })
       .receive('error', (resp) => console.error('Failed to join', resp))
 
     // Terminal input → channel

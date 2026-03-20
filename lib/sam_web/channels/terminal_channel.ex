@@ -6,11 +6,21 @@ defmodule SamWeb.TerminalChannel do
     case Registry.lookup(Sam.ProcessRegistry, session_id) do
       [{_pid, _}] ->
         Phoenix.PubSub.subscribe(Sam.PubSub, "session:#{session_id}")
+        # Send a blank input to nudge the PTY into sending a fresh prompt
+        send(self(), :request_redraw)
         {:ok, assign(socket, session_id: session_id)}
 
       [] ->
         {:error, %{reason: "session not found"}}
     end
+  end
+
+  @impl true
+  def handle_info(:request_redraw, socket) do
+    # Trigger a resize — this forces most terminal programs to redraw their screen
+    # Use default size; the client will send the real size momentarily via the resize event
+    Sam.Session.Server.resize(socket.assigns.session_id, 80, 24)
+    {:noreply, socket}
   end
 
   @impl true
