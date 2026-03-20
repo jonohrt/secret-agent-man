@@ -104,6 +104,21 @@ defmodule Sam.Session.Server do
   end
 
   @impl true
+  def handle_info({:parser_event, _, %{type: :activity}}, state) do
+    # Parser flushed an activity batch — agent was producing real output
+    state = cancel_idle_timer(state)
+    timer = Process.send_after(self(), :idle_timeout, @idle_timeout_ms)
+
+    if state.status != :working do
+      state = %{state | status: :working, idle_timer: timer}
+      broadcast_ui_update(state)
+      {:noreply, state}
+    else
+      {:noreply, %{state | idle_timer: timer}}
+    end
+  end
+
+  @impl true
   def handle_info({:parser_event, _, _}, state), do: {:noreply, state}
 
   @impl true
@@ -120,20 +135,7 @@ defmodule Sam.Session.Server do
   end
 
   @impl true
-  def handle_info({:pty_output, _, _}, state) do
-    # PTY is producing output — mark as working and reset idle timer
-    # Only broadcast if status actually changed (avoid flooding LiveView)
-    state = cancel_idle_timer(state)
-    timer = Process.send_after(self(), :idle_timeout, @idle_timeout_ms)
-
-    if state.status != :working do
-      state = %{state | status: :working, idle_timer: timer}
-      broadcast_ui_update(state)
-      {:noreply, state}
-    else
-      {:noreply, %{state | idle_timer: timer}}
-    end
-  end
+  def handle_info({:pty_output, _, _}, state), do: {:noreply, state}
 
   @impl true
   def handle_info(:idle_timeout, state) do
