@@ -64,7 +64,7 @@ defmodule SamWeb.DashboardLive do
       end
 
     workdir = params["workdir"]
-    workdir = if workdir == "", do: nil, else: workdir
+    workdir = if workdir == "" or is_nil(workdir), do: File.cwd!(), else: workdir
     prompt = params["prompt"]
     prompt = if prompt == "", do: nil, else: prompt
 
