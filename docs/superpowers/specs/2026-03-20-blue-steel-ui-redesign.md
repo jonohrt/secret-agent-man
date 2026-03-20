@@ -14,7 +14,7 @@ Full visual redesign of the SAM dashboard from the current retro CRT monospace a
 ### Non-Goals
 
 - Backend changes (Server, Parser, PTY, Summarizer are untouched)
-- New features (sub-agent tracking is display-only — the data model already supports it)
+- Sub-agent tracking — the `agents` field exists in Server state but is never populated. The Agents Panel is designed to support multiple agents in the future, but the initial implementation shows only the main agent per session. Sub-agent data flow is a separate backend feature.
 - Mobile responsiveness (desktop-first, as the current app is)
 
 ---
@@ -154,7 +154,7 @@ CSS Grid: `grid-template-columns: 8fr 4fr`, two rows, `gap: 10px`, `padding: 10p
 
 #### Agents Panel (4 cols, bottom right)
 
-- Panel header: "AGENTS" + count ("4 ACTIVE")
+- Panel header: "AGENTS" + count
 - Two-line rows per agent (option B from brainstorming):
   - **Top line**: Status dot + agent name (JetBrains Mono) + badge ("PRIMARY" for main agent) + status text
   - **Bottom line**: Activity description in `--outline`, 8px, truncated with ellipsis
@@ -165,6 +165,8 @@ CSS Grid: `grid-template-columns: 8fr 4fr`, two rows, `gap: 10px`, `padding: 10p
   - Complete/Done: `--primary`
   - Idle: `--outline`
   - Error: `--error`
+
+**Initial implementation (v1):** The panel shows only the main agent per session, since sub-agent data is not yet populated in the backend. The panel structure (two-line rows, click-to-switch) is built out so that when sub-agent tracking is added to Server, the UI is ready. In v1, the single main agent row is always selected and the "VIEWING:" indicator always reads "main".
 
 ### Footer
 
@@ -232,8 +234,9 @@ Triggered by "+ DEPLOY AGENT" button. Overlays the dashboard.
    - `--text-secondary` → maps to `--on-surface-variant`
    - `--text-muted` → maps to `--outline`
    - Status colors remain the same property names
-4. Keep `theme.js` with `initTheme()` / `applyTheme()` / `cycleTheme()` — just only one theme for now
-5. Keep `Ctrl+T` cycling infrastructure (no-ops with one theme, ready for future themes)
+4. Old property names (`--bg-primary`, `--accent`, etc.) are removed entirely — all CSS is rewritten to use the new token names. No aliases needed since we're rewriting all stylesheets in this pass.
+5. Keep `theme.js` with `initTheme()` / `applyTheme()` / `cycleTheme()` — just only one theme for now
+6. Keep `Ctrl+T` cycling infrastructure but hide "CTRL+T: CYCLE THEME" from the footer when only one theme exists. Show it conditionally when `themes.length > 1`.
 
 ### Future Theming
 
@@ -290,7 +293,14 @@ The "+ DEPLOY AGENT" button shows the glassmorphism modal. "INITIATE OPERATION" 
 
 ### Send Input
 
-The "SEND INPUT" button in the status bar opens an inline input field (replacing the removed bottom input bar). This appears contextually when the session status is `:needs_input`.
+When the session status is `:needs_input`, the status bar transforms to show the input UI inline:
+
+- The status badge changes to "NEEDS INPUT" in `--primary` with a pulsing glow to draw attention
+- The right side of the status bar replaces the action buttons with: a text input field (JetBrains Mono, `--surface-container-lowest` background, bottom-border only, `--primary` caret) + quick-response buttons ("YES" / "NO" in small outlined pills) + a submit button
+- The text input auto-focuses when the status transitions to `:needs_input`
+- Submitting (Enter key or submit button) sends the input via the existing `send_input` event and the status bar returns to normal
+
+When the session is NOT in `:needs_input`, the "SEND INPUT" button is shown as a fallback for manually sending text to the PTY (existing behavior).
 
 ### Status Dot Glow
 
