@@ -56,8 +56,13 @@ const TerminalHook = {
     })
 
     // Channel output → terminal
+    // Decode base64 to Uint8Array (not string) to preserve multi-byte UTF-8
     this.channel.on('output', ({ data }) => {
-      const bytes = atob(data)
+      const binary = atob(data)
+      const bytes = new Uint8Array(binary.length)
+      for (let i = 0; i < binary.length; i++) {
+        bytes[i] = binary.charCodeAt(i)
+      }
       this.term.write(bytes)
     })
 
