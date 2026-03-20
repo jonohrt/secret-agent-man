@@ -16,8 +16,8 @@ defmodule Sam.Session.TranscriptWatcherTest do
         _test_jsonl_path: jsonl_path
       })
 
-    # Give the watcher time to find the file and set offset
-    Process.sleep(100)
+    # Wait for the watcher to process init and set offset
+    _ = :sys.get_state(pid)
 
     # Append a tool_use record
     record =
@@ -50,7 +50,7 @@ defmodule Sam.Session.TranscriptWatcherTest do
         _test_jsonl_path: jsonl_path
       })
 
-    Process.sleep(100)
+    _ = :sys.get_state(pid)
 
     record =
       Jason.encode!(%{
@@ -82,7 +82,7 @@ defmodule Sam.Session.TranscriptWatcherTest do
         _test_jsonl_path: jsonl_path
       })
 
-    Process.sleep(100)
+    _ = :sys.get_state(pid)
 
     record = Jason.encode!(%{"type" => "system", "subtype" => "turn_duration"})
     File.write!(jsonl_path, record <> "\n", [:append])
