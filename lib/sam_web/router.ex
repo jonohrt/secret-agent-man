@@ -20,8 +20,8 @@ defmodule SamWeb.Router do
     live "/", DashboardLive
   end
 
-  # Other scopes may use custom stacks.
-  # scope "/api", SamWeb do
-  #   pipe_through :api
-  # end
+  scope "/api", SamWeb do
+    pipe_through :api
+    post "/hooks", HookController, :create
+  end
 end
