@@ -2,7 +2,7 @@ defmodule Sam.Session.Server do
   use GenServer
   require Logger
 
-  @idle_timeout_ms 5_000
+  @idle_timeout_ms 1_000
 
   defstruct [
     :session_id, :name, :agent_type, :branch, :workdir, :idle_timer,
@@ -71,7 +71,6 @@ defmodule Sam.Session.Server do
   @impl true
   def handle_cast({:send_input, data}, state) do
     Phoenix.PubSub.broadcast(Sam.PubSub, "session_input:#{state.session_id}", {:input, data})
-    state = set_working(state)
     {:noreply, state}
   end
 
