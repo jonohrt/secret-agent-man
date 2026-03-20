@@ -1,0 +1,7 @@
+{
+  "database": "dolt",
+  "backend": "dolt",
+  "dolt_mode": "server",
+  "dolt_database": "secret_agent_man",
+  "project_id": "55978608-fadc-4c89-bcf9-5fd11ed9c8b9"
+}

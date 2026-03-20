@@ -41,3 +41,7 @@ npm-debug.log
 /zig_src/zig-out/
 /zig_src/.zig-cache/
 /priv/native/pty_port
+
+# Dolt database files (added by bd init)
+.dolt/
+*.db
