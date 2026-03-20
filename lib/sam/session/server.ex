@@ -57,6 +57,9 @@ defmodule Sam.Session.Server do
       status: :running
     }
 
+    # Broadcast initial state so LiveView picks it up
+    broadcast_ui_update(state)
+
     {:ok, state}
   end
 
@@ -104,7 +107,14 @@ defmodule Sam.Session.Server do
 
   @impl true
   def handle_info({:summary, _session_id, summary}, state) do
-    activity = [summary | state.activity] |> Enum.take(100)
+    # Normalize to a consistent format the LiveView can render
+    entry = %{
+      type: :summary,
+      text: summary.summary,
+      timestamp: summary.timestamp,
+      raw_events: summary.raw_events
+    }
+    activity = [entry | state.activity] |> Enum.take(100)
     state = %{state | activity: activity}
     broadcast_ui_update(state)
     {:noreply, state}

@@ -2,7 +2,7 @@ defmodule Sam.Session.Summarizer do
   use GenServer
 
   @default_debounce_ms 5_000
-  @decision_point_types [:tool_call, :input_needed, :agent_spawn, :completion]
+  @decision_point_types [:tool_call, :input_needed, :agent_spawn, :completion, :activity]
 
   defstruct [:session_id, :debounce_ms, :timer_ref, buffer: []]
 

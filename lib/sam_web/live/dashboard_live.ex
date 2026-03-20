@@ -119,6 +119,9 @@ defmodule SamWeb.DashboardLive do
   defp status_class(nil), do: "idle"
   defp status_class(status), do: Atom.to_string(status)
 
+  defp format_time(%DateTime{} = dt), do: Calendar.strftime(dt, "%H:%M:%S")
+  defp format_time(_), do: ""
+
   @impl true
   def render(assigns) do
     ~H"""
@@ -173,7 +176,7 @@ defmodule SamWeb.DashboardLive do
               <%= if state && state.activity != [] do %>
                 <%= for item <- state.activity do %>
                   <div class="activity-item">
-                    <span class="activity-badge">{Map.get(item, :type, "info")}</span>
+                    <span class="activity-time"><%= format_time(Map.get(item, :timestamp)) %></span>
                     <span class="activity-text">{Map.get(item, :text, inspect(item))}</span>
                   </div>
                 <% end %>
