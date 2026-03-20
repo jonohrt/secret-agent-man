@@ -1,0 +1,101 @@
+/* SAM Dashboard Themes — Retro CRT Aesthetic */
+
+/* ============================================================
+   TRON (default) — Cyan on black, scanlines, glow
+   ============================================================ */
+body.theme-tron {
+  --bg-primary: #0a0a1a;
+  --bg-secondary: #0d0d2b;
+  --bg-tertiary: #12123a;
+  --accent: #00ffff;
+  --accent-glow: rgba(0, 255, 255, 0.4);
+  --accent-dim: rgba(0, 255, 255, 0.15);
+  --text-primary: #e0f7fa;
+  --text-secondary: #80deea;
+  --text-muted: #4a6a6e;
+  --status-working: #00ffff;
+  --status-input: #ffff00;
+  --status-idle: #555577;
+  --status-error: #ff4444;
+  --status-done: #00ff88;
+  --status-starting: #aa88ff;
+  --border: rgba(0, 255, 255, 0.2);
+  --border-active: rgba(0, 255, 255, 0.6);
+  --scanline-display: block;
+  --glow-intensity: 0.6;
+}
+
+/* ============================================================
+   SYNTHWAVE — Pink/purple neon, no scanlines
+   ============================================================ */
+body.theme-synthwave {
+  --bg-primary: #1a0a2e;
+  --bg-secondary: #220e3a;
+  --bg-tertiary: #2a1248;
+  --accent: #ff0080;
+  --accent-glow: rgba(255, 0, 128, 0.4);
+  --accent-dim: rgba(255, 0, 128, 0.15);
+  --text-primary: #f0d0f0;
+  --text-secondary: #cc88cc;
+  --text-muted: #6a4a6a;
+  --status-working: #ff0080;
+  --status-input: #ffdd00;
+  --status-idle: #554477;
+  --status-error: #ff3333;
+  --status-done: #00ff88;
+  --status-starting: #cc66ff;
+  --border: rgba(255, 0, 128, 0.2);
+  --border-active: rgba(255, 0, 128, 0.6);
+  --scanline-display: none;
+  --glow-intensity: 0.5;
+}
+
+/* ============================================================
+   PHOSPHOR — Green on black, scanlines
+   ============================================================ */
+body.theme-phosphor {
+  --bg-primary: #0a0a0a;
+  --bg-secondary: #0d1a0d;
+  --bg-tertiary: #112211;
+  --accent: #00ff66;
+  --accent-glow: rgba(0, 255, 102, 0.4);
+  --accent-dim: rgba(0, 255, 102, 0.15);
+  --text-primary: #d0ffd0;
+  --text-secondary: #88cc88;
+  --text-muted: #446644;
+  --status-working: #00ff66;
+  --status-input: #ccff00;
+  --status-idle: #335533;
+  --status-error: #ff4444;
+  --status-done: #66ffaa;
+  --status-starting: #88ff88;
+  --border: rgba(0, 255, 102, 0.2);
+  --border-active: rgba(0, 255, 102, 0.6);
+  --scanline-display: block;
+  --glow-intensity: 0.5;
+}
+
+/* ============================================================
+   AMBER — Amber CRT monochrome, scanlines
+   ============================================================ */
+body.theme-amber {
+  --bg-primary: #0a0800;
+  --bg-secondary: #141000;
+  --bg-tertiary: #1e1800;
+  --accent: #ffaa00;
+  --accent-glow: rgba(255, 170, 0, 0.4);
+  --accent-dim: rgba(255, 170, 0, 0.15);
+  --text-primary: #ffe0a0;
+  --text-secondary: #cc9944;
+  --text-muted: #665522;
+  --status-working: #ffaa00;
+  --status-input: #ffdd44;
+  --status-idle: #554400;
+  --status-error: #ff4400;
+  --status-done: #aaff00;
+  --status-starting: #ffcc44;
+  --border: rgba(255, 170, 0, 0.2);
+  --border-active: rgba(255, 170, 0, 0.6);
+  --scanline-display: block;
+  --glow-intensity: 0.5;
+}
