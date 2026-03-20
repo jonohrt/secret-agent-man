@@ -2,8 +2,10 @@ defmodule Sam.Session.Server do
   use GenServer
   require Logger
 
+  @idle_timeout_ms 5_000
+
   defstruct [
-    :session_id, :name, :agent_type, :branch, :workdir,
+    :session_id, :name, :agent_type, :branch, :workdir, :idle_timer,
     status: :starting,
     activity: [],
     agents: []
@@ -57,9 +59,7 @@ defmodule Sam.Session.Server do
       status: :running
     }
 
-    # Broadcast initial state so LiveView picks it up
     broadcast_ui_update(state)
-
     {:ok, state}
   end
 
@@ -71,7 +71,8 @@ defmodule Sam.Session.Server do
   @impl true
   def handle_cast({:send_input, data}, state) do
     Phoenix.PubSub.broadcast(Sam.PubSub, "session_input:#{state.session_id}", {:input, data})
-    {:noreply, %{state | status: :running}}
+    state = set_working(state)
+    {:noreply, state}
   end
 
   @impl true
@@ -97,6 +98,7 @@ defmodule Sam.Session.Server do
 
   @impl true
   def handle_info({:parser_event, _session_id, %{type: :input_needed}}, state) do
+    state = cancel_idle_timer(state)
     state = %{state | status: :needs_input}
     broadcast_ui_update(state)
     {:noreply, state}
@@ -107,9 +109,6 @@ defmodule Sam.Session.Server do
 
   @impl true
   def handle_info({:summary, _session_id, summary}, state) do
-    # Normalize to a consistent format the LiveView can render
-    # Don't store raw_events in state — they contain raw PTY bytes that
-    # can't be JSON-serialized and will crash LiveView
     entry = %{
       type: :summary,
       text: summary.summary,
@@ -122,10 +121,27 @@ defmodule Sam.Session.Server do
   end
 
   @impl true
-  def handle_info({:pty_output, _, _}, state), do: {:noreply, state}
+  def handle_info({:pty_output, _, _}, state) do
+    # PTY is producing output — mark as working and reset idle timer
+    state = set_working(state)
+    {:noreply, state}
+  end
+
+  @impl true
+  def handle_info(:idle_timeout, state) do
+    # No output for @idle_timeout_ms — transition to idle
+    if state.status == :working do
+      state = %{state | status: :idle, idle_timer: nil}
+      broadcast_ui_update(state)
+      {:noreply, state}
+    else
+      {:noreply, %{state | idle_timer: nil}}
+    end
+  end
 
   @impl true
   def handle_info({:pty_exit, _session_id, 0}, state) do
+    state = cancel_idle_timer(state)
     state = %{state | status: :done}
     broadcast_ui_update(state)
     {:noreply, state}
@@ -133,12 +149,38 @@ defmodule Sam.Session.Server do
 
   @impl true
   def handle_info({:pty_exit, _session_id, _code}, state) do
+    state = cancel_idle_timer(state)
     state = %{state | status: :error}
     broadcast_ui_update(state)
     {:noreply, state}
   end
 
+  ## Private helpers
+
+  defp set_working(state) do
+    # Only transition and broadcast if status actually changes
+    state = cancel_idle_timer(state)
+    timer = Process.send_after(self(), :idle_timeout, @idle_timeout_ms)
+    new_status = :working
+
+    if state.status != new_status do
+      state = %{state | status: new_status, idle_timer: timer}
+      broadcast_ui_update(state)
+      state
+    else
+      %{state | idle_timer: timer}
+    end
+  end
+
+  defp cancel_idle_timer(%{idle_timer: nil} = state), do: state
+  defp cancel_idle_timer(%{idle_timer: ref} = state) do
+    Process.cancel_timer(ref)
+    %{state | idle_timer: nil}
+  end
+
   defp broadcast_ui_update(state) do
-    Phoenix.PubSub.broadcast(Sam.PubSub, "sessions:ui", {:session_update, state.session_id, state})
+    # Don't include the timer ref in the broadcast — it's not serializable
+    clean_state = %{state | idle_timer: nil}
+    Phoenix.PubSub.broadcast(Sam.PubSub, "sessions:ui", {:session_update, state.session_id, clean_state})
   end
 end

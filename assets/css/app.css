@@ -198,6 +198,7 @@ body::before {
    ============================================================ */
 
 .status-dot.running  { background: var(--status-working); box-shadow: 0 0 6px var(--status-working); }
+.status-dot.working  { background: var(--status-working); box-shadow: 0 0 6px var(--status-working); }
 .status-dot.needs_input { background: var(--status-input); box-shadow: 0 0 6px var(--status-input); }
 .status-dot.idle     { background: var(--status-idle); }
 .status-dot.error    { background: var(--status-error); box-shadow: 0 0 6px var(--status-error); }
