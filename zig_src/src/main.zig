@@ -135,6 +135,11 @@ fn dupeZ(s: []const u8) [*c]u8 {
 }
 
 fn doExec(cmd: SpawnCmd) noreturn {
+    // Set locale and terminal type for proper UTF-8 and color support
+    _ = c.setenv("LANG", "en_US.UTF-8", 1);
+    _ = c.setenv("LC_ALL", "en_US.UTF-8", 1);
+    _ = c.setenv("TERM", "xterm-256color", 1);
+
     // Change working directory if specified
     if (cmd.workdir) |wd| {
         const wd_cstr = dupeZ(wd);
