@@ -229,7 +229,7 @@ defmodule SamWeb.DashboardLive do
 
       <%!-- New Session Dialog --%>
       <%= if @show_new_dialog do %>
-        <div class="dialog-overlay" phx-click="toggle_new_dialog">
+        <div class="dialog-overlay">
           <div class="dialog" phx-click-away="toggle_new_dialog">
             <div class="dialog-header">New Session</div>
             <form phx-submit="create_session">
