@@ -11,6 +11,8 @@ defmodule Sam.Application do
       SamWeb.Telemetry,
       {DNSCluster, query: Application.get_env(:sam, :dns_cluster_query) || :ignore},
       {Phoenix.PubSub, name: Sam.PubSub},
+      {Registry, keys: :unique, name: Sam.ProcessRegistry},
+      {DynamicSupervisor, name: Sam.SessionSupervisor, strategy: :one_for_one},
       # Start a worker by calling: Sam.Worker.start_link(arg)
       # {Sam.Worker, arg},
       # Start to serve requests, typically the last entry
