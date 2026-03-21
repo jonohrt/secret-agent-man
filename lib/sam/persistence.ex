@@ -12,6 +12,7 @@ defmodule Sam.Persistence do
   def init(_) do
     dets_path = Path.join(data_dir(), "sam_sessions") |> to_charlist()
     {:ok, table} = :dets.open_file(:sam_persistence, file: dets_path, type: :set)
+    cleanup_stale(table)
     schedule_flush()
     {:ok, %{table: table}}
   end
@@ -41,6 +42,12 @@ defmodule Sam.Persistence do
 
   def delete_session(table \\ :sam_persistence, session_id) do
     :dets.delete(table, session_id)
+  rescue
+    ArgumentError -> :ok
+  end
+
+  def cleanup_stale(table \\ :sam_persistence) do
+    :dets.delete_all_objects(table)
   rescue
     ArgumentError -> :ok
   end

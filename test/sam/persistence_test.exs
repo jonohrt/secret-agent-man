@@ -51,4 +51,13 @@ defmodule Sam.PersistenceTest do
 
     assert :dets.lookup(table, "session-1") == []
   end
+
+  test "cleanup_stale removes all entries from table", %{table: table} do
+    :dets.insert(table, {"session-1", %{session_id: "session-1", name: "Stale"}})
+    :dets.insert(table, {"session-2", %{session_id: "session-2", name: "Also Stale"}})
+
+    Sam.Persistence.cleanup_stale(table)
+
+    assert Sam.Persistence.load_saved_sessions(table) == []
+  end
 end
