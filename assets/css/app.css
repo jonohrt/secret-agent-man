@@ -958,3 +958,62 @@ body::before {
   color: var(--on-surface);
   font-style: normal;
 }
+
+/* Terminal Modal */
+.terminal-modal-overlay.hidden { display: none; }
+.terminal-modal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  background: rgba(0, 0, 0, 0.9);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.terminal-modal {
+  width: 95vw;
+  height: 90vh;
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--phosphor-green);
+  border-radius: 8px;
+  overflow: hidden;
+  box-shadow: 0 0 20px rgba(34, 197, 94, 0.15), 0 0 40px rgba(34, 197, 94, 0.05);
+}
+
+.terminal-modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.5rem 1rem;
+  background: var(--surface-dim);
+  border-bottom: 1px solid var(--surface-bright);
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  color: var(--phosphor-green);
+}
+
+.terminal-modal-title {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.terminal-modal-close {
+  background: none;
+  border: none;
+  color: var(--outline);
+  cursor: pointer;
+  font-size: 1rem;
+  padding: 0.25rem 0.5rem;
+}
+
+.terminal-modal-close:hover {
+  color: var(--status-error);
+}
+
+.terminal-modal-body {
+  flex: 1;
+  background: #020f1e;
+}
