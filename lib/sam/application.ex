@@ -16,6 +16,7 @@ defmodule Sam.Application do
       # Start a worker by calling: Sam.Worker.start_link(arg)
       # {Sam.Worker, arg},
       Sam.Persistence,
+      Sam.Settings,
       # Start to serve requests, typically the last entry
       SamWeb.Endpoint
     ]
