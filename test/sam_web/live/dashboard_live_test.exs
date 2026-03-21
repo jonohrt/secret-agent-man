@@ -62,8 +62,11 @@ defmodule SamWeb.DashboardLiveTest do
       if Process.alive?(pid), do: GenServer.stop(pid)
     end)
 
-    # Mount after session exists — LiveView will load and auto-select it
+    # Mount after session exists — LiveView will load it
     {:ok, view, _static_html} = live(conn, "/")
+
+    # Explicitly select our session (ghosts from DETS may be auto-selected first)
+    view |> element(".sam-tab", "Uptime Test") |> render_click()
 
     # Use render/1 to get the connected LiveView HTML
     html = render(view)
