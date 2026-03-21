@@ -48,14 +48,16 @@ Status is driven by Claude Code hooks (PreToolUse/PostToolUse) firing HTTP reque
 git clone https://github.com/jonohrt/secret-agent-man.git
 cd secret-agent-man
 
-# Install dependencies and build the Zig PTY port
-mix setup
+# Bootstrap everything (checks deps, installs missing ones, builds project)
+./bin/setup
 
 # Start the development server
 mix phx.server
 ```
 
 Open [http://localhost:4000](http://localhost:4000) in your browser.
+
+> **Already have Elixir, Zig, and Node installed?** You can skip the bootstrap and run `mix setup` directly.
 
 ### Ollama (optional)
 
