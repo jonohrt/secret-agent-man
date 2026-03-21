@@ -71,9 +71,27 @@ defmodule Sam.Session.GroupSupervisor do
                workdir: Map.get(opts, :workdir)
              }
            ]}
+      },
+      %{
+        id: Sam.Session.JournalFinder,
+        start:
+          {Sam.Session.JournalFinder, :start_link,
+           [%{session_id: session_id, watch_dir: journal_watch_dir(Map.get(opts, :workdir))}]},
+        restart: :temporary
       }
     ]
 
     Supervisor.init(children, strategy: :rest_for_one)
+  end
+
+  defp journal_watch_dir(nil) do
+    cwd = File.cwd!()
+    encoded = String.replace(cwd, "/", "-")
+    Path.join(Path.join(System.user_home!(), ".claude/projects"), encoded)
+  end
+
+  defp journal_watch_dir(workdir) do
+    encoded = String.replace(workdir, "/", "-")
+    Path.join(Path.join(System.user_home!(), ".claude/projects"), encoded)
   end
 end
