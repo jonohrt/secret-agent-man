@@ -1017,3 +1017,38 @@ body::before {
   flex: 1;
   background: #020f1e;
 }
+
+/* Ghost tabs */
+.sam-tab.ghost {
+  opacity: 0.5;
+  border-style: dashed;
+}
+.sam-tab.ghost:hover {
+  opacity: 0.8;
+}
+.ghost-label {
+  font-size: 0.6rem;
+  color: var(--phosphor-green);
+  margin-left: 0.5rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+.ghost-dismiss {
+  background: none;
+  border: none;
+  color: var(--outline);
+  cursor: pointer;
+  font-size: 0.7rem;
+  margin-left: 0.25rem;
+  padding: 0 0.2rem;
+}
+.ghost-dismiss:hover {
+  color: var(--status-error);
+}
+
+/* Disconnected status dot */
+.status-dot.disconnected {
+  background: var(--outline);
+  opacity: 0.4;
+  box-shadow: none;
+}
