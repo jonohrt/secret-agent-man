@@ -217,6 +217,9 @@ check_chromedriver() {
   if ask "Install chromedriver? ($cmd)"; then
     eval "$cmd"
     ok "chromedriver installed"
+    if [[ "$OS" == "macos" ]]; then
+      warn "macOS may block chromedriver. If so, go to System Settings > Privacy & Security and allow it."
+    fi
   else
     ok "Skipped (E2E tests won't run)"
   fi
