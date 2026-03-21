@@ -187,6 +187,34 @@ defmodule Sam.Session.ServerTest do
     end
   end
 
+  describe "summary events" do
+    test "summary event updates activity feed" do
+      session_id = "test-summary-#{System.unique_integer([:positive])}"
+
+      Phoenix.PubSub.subscribe(Sam.PubSub, "sessions:ui")
+
+      {:ok, pid} =
+        GenServer.start_link(Sam.Session.Server, %{session_id: session_id, name: "Sum Test"})
+
+      assert_receive {:session_update, ^session_id, %{status: :idle}}, 1000
+
+      Phoenix.PubSub.broadcast(
+        Sam.PubSub,
+        "session:#{session_id}",
+        {:summary, session_id,
+         %{
+           summary: "Fixed auth bug in login.ex, tests passing",
+           timestamp: DateTime.utc_now()
+         }}
+      )
+
+      assert_receive {:session_update, ^session_id, state}, 1000
+      assert [%{text: "Fixed auth bug in login.ex, tests passing", type: :summary} | _] = state.activity
+
+      GenServer.stop(pid)
+    end
+  end
+
   describe "agent title fallback" do
     test "agent entry gets fallback description when hook sends empty string" do
       session_id = "test-agent-title-#{System.unique_integer([:positive])}"

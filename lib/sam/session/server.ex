@@ -227,8 +227,15 @@ defmodule Sam.Session.Server do
   def handle_info({:parser_event, _, _}, state), do: {:noreply, state}
 
   @impl true
-  def handle_info({:summary, _session_id, _summary}, state) do
-    # Summaries from PTY output are too noisy — activity feed uses hook events instead
+  def handle_info({:summary, _session_id, %{summary: summary}}, state) do
+    entry = %{
+      type: :summary,
+      text: summary,
+      timestamp: DateTime.utc_now()
+    }
+
+    state = %{state | activity: [entry | state.activity] |> Enum.take(50)}
+    broadcast_ui_update(state)
     {:noreply, state}
   end
 
