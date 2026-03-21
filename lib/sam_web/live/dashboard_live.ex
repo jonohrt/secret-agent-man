@@ -7,6 +7,7 @@ defmodule SamWeb.DashboardLive do
   def mount(_params, _session, socket) do
     if connected?(socket) do
       Phoenix.PubSub.subscribe(Sam.PubSub, "sessions:ui")
+      :timer.send_interval(1_000, self(), :tick)
     end
 
     sessions = load_sessions()
@@ -146,7 +147,8 @@ defmodule SamWeb.DashboardLive do
       branch: new_state.branch,
       workdir: new_state.workdir,
       activity: new_state.activity,
-      agents: new_state.agents
+      agents: new_state.agents,
+      started_at: new_state.started_at
     }
 
     # Check for notification-worthy transition
@@ -174,6 +176,11 @@ defmodule SamWeb.DashboardLive do
     {:noreply, assign(socket, selected_workdir: path)}
   end
 
+  @impl true
+  def handle_info(:tick, socket) do
+    {:noreply, assign(socket, tick: socket.assigns.tick + 1)}
+  end
+
   # -- Helpers --
 
   defp load_sessions do
@@ -190,7 +197,8 @@ defmodule SamWeb.DashboardLive do
           branch: state.branch,
           workdir: state.workdir,
           activity: state.activity,
-          agents: state.agents
+          agents: state.agents,
+          started_at: state.started_at
         }
 
         Map.put(acc, id, session_map)

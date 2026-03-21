@@ -160,6 +160,19 @@ defmodule Sam.Session.ServerTest do
     end
   end
 
+  describe "started_at" do
+    test "server sets started_at on init" do
+      session_id = "test-uptime-#{System.unique_integer([:positive])}"
+      before = DateTime.utc_now()
+      opts = %{session_id: session_id}
+      _pid = start_supervised!({Sam.Session.Server, opts})
+
+      state = Sam.Session.Server.get_state(session_id)
+      assert %DateTime{} = state.started_at
+      assert DateTime.compare(state.started_at, before) in [:gt, :eq]
+    end
+  end
+
   describe "branch detection" do
     test "server populates branch from git on init" do
       session_id = "test-branch-#{System.unique_integer([:positive])}"

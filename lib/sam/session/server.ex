@@ -12,6 +12,7 @@ defmodule Sam.Session.Server do
     :workdir,
     :idle_timer,
     :idle_timeout_ms,
+    :started_at,
     status: :idle,
     activity: [],
     agents: []
@@ -67,6 +68,7 @@ defmodule Sam.Session.Server do
       workdir: workdir,
       branch: detect_branch(workdir),
       idle_timeout_ms: Map.get(opts, :idle_timeout_ms, @idle_timeout_ms),
+      started_at: DateTime.utc_now(),
       status: :idle
     }
 
