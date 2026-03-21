@@ -259,6 +259,11 @@ mix local.rebar --force --if-missing
 ok "Hex and Rebar ready"
 echo ""
 
+info "Installing npm packages (xterm.js)..."
+npm install --prefix assets
+ok "npm packages ready"
+echo ""
+
 info "Running mix setup (deps, Zig build, assets)..."
 mix setup
 ok "Project setup complete"
