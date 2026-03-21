@@ -23,7 +23,8 @@ defmodule SamWeb.DashboardLive do
        tick: 0,
        default_workdir: Sam.Settings.get(:default_workdir, File.cwd!()),
        mru_workdirs: Sam.Settings.get(:mru_workdirs, []),
-       show_settings: false
+       show_settings: false,
+       ollama_available: Sam.LLM.OllamaClient.available?()
      )}
   end
 
@@ -254,6 +255,7 @@ defmodule SamWeb.DashboardLive do
 
   defp agent_activity_text(_), do: "Awaiting directives"
 
+  defp activity_msg_class(%{type: :summary}), do: "summary"
   defp activity_msg_class(%{type: :system}), do: "system"
   defp activity_msg_class(%{type: :agent_event}), do: "agent-event"
   defp activity_msg_class(_), do: ""
@@ -497,6 +499,19 @@ defmodule SamWeb.DashboardLive do
             <span style="opacity: 0.5;">LIVE</span>
           </div>
           <div class="sam-panel-body">
+            <%= unless @ollama_available do %>
+              <div class="ollama-nudge">
+                ⚡ Install
+                <a
+                  href="https://ollama.com"
+                  target="_blank"
+                  style="color: var(--phosphor-green); text-decoration: underline;"
+                >
+                  Ollama
+                </a>
+                for AI-powered summaries
+              </div>
+            <% end %>
             <%= if @selected_session do %>
               <% state = selected_state(@sessions, @selected_session) %>
               <%= if state do %>

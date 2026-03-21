@@ -943,3 +943,18 @@ body::before {
   opacity: 0; transition: opacity 0.15s;
 }
 .picker-dir:hover .picker-select-btn { opacity: 1; }
+
+/* Ollama nudge */
+.ollama-nudge {
+  padding: 0.4rem 0.75rem;
+  font-size: 0.7rem;
+  color: var(--outline);
+  border-bottom: 1px solid var(--surface-bright);
+  background: rgba(175,201,234,0.05);
+}
+
+/* Summary entries in activity feed */
+.activity-item .msg.summary {
+  color: var(--on-surface);
+  font-style: normal;
+}
