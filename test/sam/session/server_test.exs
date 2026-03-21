@@ -209,7 +209,9 @@ defmodule Sam.Session.ServerTest do
       )
 
       assert_receive {:session_update, ^session_id, state}, 1000
-      assert [%{text: "Fixed auth bug in login.ex, tests passing", type: :summary} | _] = state.activity
+
+      assert [%{text: "Fixed auth bug in login.ex, tests passing", type: :summary} | _] =
+               state.activity
 
       GenServer.stop(pid)
     end
