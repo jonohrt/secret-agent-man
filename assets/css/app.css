@@ -906,3 +906,40 @@ body::before {
   border-radius: 50%;
   margin-right: 4px;
 }
+
+/* ============================================
+   DIRECTORY PICKER
+   ============================================ */
+
+.picker-mru { display: flex; gap: 0.5rem; margin-bottom: 0.75rem; flex-wrap: wrap; }
+.picker-chip {
+  background: rgba(175,201,234,0.1); border: 1px solid rgba(175,201,234,0.2);
+  border-radius: 999px; padding: 0.3rem 0.75rem; font-size: 0.75rem;
+  color: var(--primary); cursor: pointer; font-family: var(--font-mono);
+}
+.picker-chip:hover { background: rgba(34,197,94,0.15); border-color: rgba(34,197,94,0.3); color: var(--phosphor-green); }
+.picker-mru-label { color: var(--outline); font-size: 0.7rem; align-self: center; margin-left: 0.25rem; }
+.picker-input-row { display: flex; gap: 0.5rem; margin-bottom: 0.75rem; }
+.picker-browse-btn {
+  background: var(--phosphor-green); color: var(--surface); border: none; border-radius: 6px;
+  padding: 0.6rem 0.8rem; font-weight: 600; font-size: 0.75rem; cursor: pointer; white-space: nowrap;
+  font-family: var(--font-body); text-transform: uppercase; letter-spacing: 0.05em;
+}
+.picker-tree {
+  background: var(--surface); border: 1px solid var(--surface-bright);
+  border-radius: 6px; padding: 0.75rem; font-family: var(--font-mono);
+  font-size: 0.8rem; max-height: 200px; overflow-y: auto;
+}
+.picker-breadcrumb { color: var(--outline); margin-bottom: 0.5rem; font-size: 0.7rem; }
+.picker-error { color: var(--status-error); font-size: 0.75rem; margin-bottom: 0.5rem; }
+.picker-dir {
+  color: var(--on-surface); padding: 0.2rem 0.5rem; cursor: pointer;
+  display: flex; align-items: center; justify-content: space-between; border-radius: 4px;
+}
+.picker-dir:hover { background: rgba(34,197,94,0.1); }
+.picker-select-btn {
+  background: none; border: 1px solid var(--phosphor-green); color: var(--phosphor-green);
+  border-radius: 4px; padding: 0.1rem 0.4rem; font-size: 0.65rem; cursor: pointer;
+  opacity: 0; transition: opacity 0.15s;
+}
+.picker-dir:hover .picker-select-btn { opacity: 1; }
