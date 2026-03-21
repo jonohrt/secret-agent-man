@@ -225,6 +225,35 @@ check_chromedriver() {
   fi
 }
 
+check_ollama() {
+  info "Checking Ollama (optional, for AI activity summaries)..."
+  if command -v ollama &>/dev/null; then
+    if ollama list &>/dev/null; then
+      ok "Ollama installed and running"
+    else
+      ok "Ollama installed"
+      warn "Run 'ollama serve' to enable AI-powered activity summaries"
+    fi
+    return
+  fi
+
+  warn "Ollama not found (summaries will fall back to text descriptions)"
+  local cmd
+  case "$PKG" in
+    brew) cmd="brew install ollama" ;;
+    apt)  cmd="curl -fsSL https://ollama.com/install.sh | sh" ;;
+    dnf)  cmd="curl -fsSL https://ollama.com/install.sh | sh" ;;
+  esac
+
+  if ask "Install Ollama? ($cmd)"; then
+    eval "$cmd"
+    ok "Ollama installed"
+    warn "Run 'ollama serve' to start it. SAM will auto-pull the model on first use."
+  else
+    ok "Skipped (activity summaries will use text descriptions)"
+  fi
+}
+
 # --- Main ---
 
 MISSING_CRITICAL=0
@@ -243,6 +272,8 @@ echo ""
 check_node
 echo ""
 check_chromedriver
+echo ""
+check_ollama
 echo ""
 
 if (( MISSING_CRITICAL )); then
