@@ -4,7 +4,7 @@ Local web dashboard for managing multiple AI coding agent sessions. Monitor what
 
 Built with Elixir/Phoenix LiveView, a custom Zig PTY port, and xterm.js. Retro 80s CRT aesthetic.
 
-![SAM Dashboard](screenshots/screenshot_localhost_2026-03-21T06-08-53-726Z_frame1.png)
+![SAM Dashboard](screenshots/screenshot_localhost_2026-03-21T15-01-33-902Z_frame1.png)
 
 ## Features
 
