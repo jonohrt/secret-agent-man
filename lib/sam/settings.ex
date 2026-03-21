@@ -35,11 +35,15 @@ defmodule Sam.Settings do
       [{^key, value}] -> value
       [] -> default
     end
+  rescue
+    ArgumentError -> default
   end
 
   defp dets_put(table, key, value) do
     :dets.insert(table, {key, value})
     :ok
+  rescue
+    ArgumentError -> :error
   end
 
   defp dets_add_mru_workdir(table, path) do
