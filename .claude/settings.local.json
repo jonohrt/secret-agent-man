@@ -1,8 +1,0 @@
-{
-  "permissions": {
-    "allow": [
-      "Bash(xargs kill:*)",
-      "mcp__screenshot-website-fast__take_screenshot"
-    ]
-  }
-}
