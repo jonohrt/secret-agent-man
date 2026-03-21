@@ -27,17 +27,17 @@ defmodule Sam.Session.ServerTest do
       GenServer.stop(pid)
     end
 
-    test "tool activity with invalid UTF-8 is sanitized" do
-      session_id = "test-utf8-tool-#{System.unique_integer([:positive])}"
+    test "tool_call no longer adds to activity (only summaries do)" do
+      session_id = "test-no-activity-#{System.unique_integer([:positive])}"
 
       Phoenix.PubSub.subscribe(Sam.PubSub, "sessions:ui")
 
       {:ok, pid} =
-        GenServer.start_link(Sam.Session.Server, %{session_id: session_id, name: "UTF8 Test"})
+        GenServer.start_link(Sam.Session.Server, %{session_id: session_id, name: "NoAct Test"})
 
       assert_receive {:session_update, ^session_id, _}, 1000
 
-      # Send a tool event (which adds to activity)
+      # Send a tool event — should NOT add to activity
       send(
         pid,
         {:parser_event, session_id,
@@ -45,8 +45,7 @@ defmodule Sam.Session.ServerTest do
       )
 
       assert_receive {:session_update, ^session_id, state}, 1000
-      assert {:ok, _json} = Jason.encode(Map.from_struct(state))
-      assert [%{text: "Read"} | _] = state.activity
+      assert state.activity == []
 
       GenServer.stop(pid)
     end
@@ -203,15 +202,50 @@ defmodule Sam.Session.ServerTest do
         "session:#{session_id}",
         {:summary, session_id,
          %{
-           summary: "Fixed auth bug in login.ex, tests passing",
+           text: "Fixed auth bug in login.ex, tests passing",
+           tool_count: 2,
            timestamp: DateTime.utc_now()
          }}
       )
 
       assert_receive {:session_update, ^session_id, state}, 1000
 
-      assert [%{text: "Fixed auth bug in login.ex, tests passing", type: :summary} | _] =
+      assert [
+               %{text: "Fixed auth bug in login.ex, tests passing", type: :summary, tool_count: 2}
+               | _
+             ] =
                state.activity
+
+      GenServer.stop(pid)
+    end
+
+    test "summary event updates dedicated summary field" do
+      session_id = "test-summary-field-#{System.unique_integer([:positive])}"
+
+      Phoenix.PubSub.subscribe(Sam.PubSub, "sessions:ui")
+
+      {:ok, pid} =
+        GenServer.start_link(Sam.Session.Server, %{session_id: session_id, name: "SumField Test"})
+
+      assert_receive {:session_update, ^session_id, %{summary: "Awaiting directives..."}}, 1000
+
+      Phoenix.PubSub.broadcast(
+        Sam.PubSub,
+        "session:#{session_id}",
+        {:summary, session_id,
+         %{
+           text: "Refactoring auth module",
+           source: :ollama,
+           tool_count: 3,
+           timestamp: DateTime.utc_now()
+         }}
+      )
+
+      assert_receive {:session_update, ^session_id, state}, 1000
+      assert state.summary == "Refactoring auth module"
+
+      # Activity list should ALSO have it (for the chronological feed)
+      assert [%{text: "Refactoring auth module"} | _] = state.activity
 
       GenServer.stop(pid)
     end

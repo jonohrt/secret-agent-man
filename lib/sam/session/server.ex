@@ -2,7 +2,7 @@ defmodule Sam.Session.Server do
   use GenServer
   require Logger
 
-  @idle_timeout_ms 2_000
+  @idle_timeout_ms 10_000
 
   defstruct [
     :session_id,
@@ -15,7 +15,8 @@ defmodule Sam.Session.Server do
     :started_at,
     status: :idle,
     activity: [],
-    agents: []
+    agents: [],
+    summary: "Awaiting directives..."
   ]
 
   ## Public API
@@ -157,13 +158,12 @@ defmodule Sam.Session.Server do
       state = cancel_idle_timer(state)
 
       tool = Map.get(event, :tool, "unknown")
-      desc = Map.get(event, :description, "")
-      label = if desc != "" and desc != nil, do: "#{tool}: #{desc}", else: tool
-      state = add_activity(state, label)
 
       # Track subagent lifecycle for Agent tools
       state =
         if tool == "Agent" do
+          desc = Map.get(event, :description, "")
+
           agent_desc =
             case desc do
               d when is_binary(d) and d != "" -> d
@@ -227,14 +227,16 @@ defmodule Sam.Session.Server do
   def handle_info({:parser_event, _, _}, state), do: {:noreply, state}
 
   @impl true
-  def handle_info({:summary, _session_id, %{summary: summary}}, state) do
+  def handle_info({:summary, _session_id, %{text: text} = payload}, state) do
     entry = %{
       type: :summary,
-      text: summary,
+      text: text,
+      source: Map.get(payload, :source, :heuristic),
+      tool_count: Map.get(payload, :tool_count, 0),
       timestamp: DateTime.utc_now()
     }
 
-    state = %{state | activity: [entry | state.activity] |> Enum.take(50)}
+    state = %{state | activity: [entry | state.activity] |> Enum.take(50), summary: text}
     broadcast_ui_update(state)
     {:noreply, state}
   end
@@ -288,16 +290,6 @@ defmodule Sam.Session.Server do
     %{state | agents: updated}
   end
 
-  defp add_activity(state, tool) do
-    entry = %{
-      type: :tool,
-      text: tool,
-      timestamp: DateTime.utc_now()
-    }
-
-    %{state | activity: [entry | state.activity] |> Enum.take(50)}
-  end
-
   defp cancel_idle_timer(%{idle_timer: nil} = state), do: state
 
   defp cancel_idle_timer(%{idle_timer: ref} = state) do
@@ -336,7 +328,7 @@ defmodule Sam.Session.Server do
         %{entry | text: sanitize_utf8(Map.get(entry, :text, ""))}
       end)
 
-    %{state | idle_timer: nil, activity: clean_activity}
+    %{state | idle_timer: nil, activity: clean_activity, summary: sanitize_utf8(state.summary)}
   end
 
   defp detect_branch(workdir) when is_binary(workdir) do
