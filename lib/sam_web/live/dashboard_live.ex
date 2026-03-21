@@ -19,7 +19,10 @@ defmodule SamWeb.DashboardLive do
        show_new_dialog: false,
        show_terminal: false,
        input_text: "",
-       tick: 0
+       tick: 0,
+       default_workdir: Sam.Settings.get(:default_workdir, File.cwd!()),
+       mru_workdirs: Sam.Settings.get(:mru_workdirs, []),
+       show_settings: false
      )}
   end
 
@@ -73,6 +76,20 @@ defmodule SamWeb.DashboardLive do
     {:noreply, assign(socket, sessions: sessions, selected_session: selected)}
   end
 
+  def handle_event("toggle_settings", _params, socket) do
+    {:noreply, assign(socket, show_settings: !socket.assigns.show_settings)}
+  end
+
+  def handle_event("save_settings", %{"default_workdir" => path}, socket) do
+    expanded =
+      if String.starts_with?(path, "~"),
+        do: String.replace_prefix(path, "~", System.user_home!()),
+        else: path
+
+    Sam.Settings.put(:default_workdir, expanded)
+    {:noreply, assign(socket, default_workdir: expanded, show_settings: false)}
+  end
+
   def handle_event("create_session", params, socket) do
     agent_type =
       try do
@@ -107,13 +124,15 @@ defmodule SamWeb.DashboardLive do
       command: command
     })
 
+    Sam.Settings.add_mru_workdir(workdir)
     sessions = load_sessions()
 
     {:noreply,
      assign(socket,
        sessions: sessions,
        selected_session: session_id,
-       show_new_dialog: false
+       show_new_dialog: false,
+       mru_workdirs: Sam.Settings.get(:mru_workdirs, [])
      )}
   end
 
@@ -149,6 +168,10 @@ defmodule SamWeb.DashboardLive do
     # Bump a counter to force LiveView to re-diff the template
     tick = Map.get(socket.assigns, :tick, 0) + 1
     {:noreply, assign(socket, sessions: sessions, tick: tick)}
+  end
+
+  def handle_info({:directory_selected, path}, socket) do
+    {:noreply, assign(socket, selected_workdir: path)}
   end
 
   # -- Helpers --
@@ -314,7 +337,7 @@ defmodule SamWeb.DashboardLive do
             </svg>
             SOUND
           </button>
-          <button class="sam-topnav-btn">
+          <button class="sam-topnav-btn" phx-click="toggle_settings">
             <svg
               width="14"
               height="14"
@@ -565,16 +588,17 @@ defmodule SamWeb.DashboardLive do
                       <option value="claude_code">CLAUDE_CODE</option>
                     </select>
                   </div>
-                  <div class="modal-field">
-                    <label class="modal-label">DEPLOYMENT_VECTOR</label>
-                    <input
-                      class="modal-input"
-                      type="text"
-                      name="workdir"
-                      placeholder="/ROOT/PROJECTS/..."
-                      style="font-family: var(--font-mono); font-size: 10px;"
-                    />
-                  </div>
+                </div>
+
+                <div class="modal-field">
+                  <label class="modal-label">DEPLOYMENT_VECTOR</label>
+                  <.live_component
+                    module={SamWeb.Components.DirectoryPicker}
+                    id="workdir-picker"
+                    base_path={@default_workdir}
+                    mru_paths={@mru_workdirs}
+                    selected_path={assigns[:selected_workdir] || @default_workdir}
+                  />
                 </div>
 
                 <div class="modal-field">
@@ -600,6 +624,37 @@ defmodule SamWeb.DashboardLive do
                       &#9656; INITIATE OPERATION
                     </button>
                   </div>
+                </div>
+              </form>
+            </div>
+          </section>
+        </div>
+      <% end %>
+
+      <%!-- SETTINGS MODAL --%>
+      <%= if @show_settings do %>
+        <div class="modal-overlay">
+          <section class="modal-panel" phx-click-away="toggle_settings">
+            <div class="modal-grid-bg"></div>
+            <div class="modal-scan"></div>
+            <div class="modal-content">
+              <h1 class="modal-title">Settings</h1>
+              <form phx-submit="save_settings">
+                <div class="modal-field">
+                  <label class="modal-label">DEFAULT_WORKDIR</label>
+                  <input
+                    class="modal-input"
+                    type="text"
+                    name="default_workdir"
+                    value={@default_workdir}
+                    style="font-family: var(--font-mono); font-size: 10px;"
+                  />
+                </div>
+                <div class="modal-footer">
+                  <button type="button" class="modal-abort" phx-click="toggle_settings">
+                    CANCEL
+                  </button>
+                  <button type="submit" class="modal-submit">SAVE</button>
                 </div>
               </form>
             </div>
