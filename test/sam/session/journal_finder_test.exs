@@ -110,7 +110,7 @@ defmodule Sam.Session.JournalFinderTest do
 
     # TranscriptWatcher should have received the path — poll until it does
     assert wait_for(fn -> :sys.get_state(tw_pid).path == jsonl_path end, 5000),
-      "TranscriptWatcher did not receive journal path within timeout"
+           "TranscriptWatcher did not receive journal path within timeout"
 
     GenServer.stop(jf_pid)
     GenServer.stop(tw_pid)
