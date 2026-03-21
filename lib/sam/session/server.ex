@@ -2,7 +2,7 @@ defmodule Sam.Session.Server do
   use GenServer
   require Logger
 
-  @idle_timeout_ms 5_000
+  @idle_timeout_ms 2_000
 
   defstruct [
     :session_id,
@@ -12,7 +12,7 @@ defmodule Sam.Session.Server do
     :workdir,
     :idle_timer,
     :idle_timeout_ms,
-    status: :starting,
+    status: :idle,
     activity: [],
     agents: []
   ]
@@ -63,7 +63,7 @@ defmodule Sam.Session.Server do
       agent_type: Map.get(opts, :agent_type, :generic),
       workdir: Map.get(opts, :workdir),
       idle_timeout_ms: Map.get(opts, :idle_timeout_ms, @idle_timeout_ms),
-      status: :running
+      status: :idle
     }
 
     broadcast_ui_update(state)
@@ -77,8 +77,26 @@ defmodule Sam.Session.Server do
 
   @impl true
   def handle_cast({:send_input, data}, state) do
-    Phoenix.PubSub.broadcast(Sam.PubSub, "session_input:#{state.session_id}", {:input, data})
-    {:noreply, state}
+    # Terminal states — ignore input
+    if state.status in [:done, :error] do
+      {:noreply, state}
+    else
+      Phoenix.PubSub.broadcast(Sam.PubSub, "session_input:#{state.session_id}", {:input, data})
+
+      # User pressed Enter → Claude is about to work
+      # Start a fallback idle timer — if no hook fires (e.g., simple text response
+      # with no tool use), we'll fall back to idle after 30s instead of being stuck
+      if state.status in [:idle, :needs_input, :background] and
+           String.contains?(data, ["\n", "\r"]) do
+        state = cancel_idle_timer(state)
+        timer = Process.send_after(self(), :idle_timeout, 30_000)
+        state = %{state | status: :working, idle_timer: timer}
+        broadcast_ui_update(state)
+        {:noreply, state}
+      else
+        {:noreply, state}
+      end
+    end
   end
 
   @impl true
@@ -113,49 +131,92 @@ defmodule Sam.Session.Server do
 
   @impl true
   def handle_info({:parser_event, _session_id, %{type: :input_needed}}, state) do
-    state = cancel_idle_timer(state)
-    state = %{state | status: :needs_input}
-    broadcast_ui_update(state)
-    {:noreply, state}
-  end
-
-  @impl true
-  def handle_info({:parser_event, _, %{type: type}}, state)
-      when type in [:tool_call, :pre_tool_call] do
-    state = cancel_idle_timer(state)
-    timer = Process.send_after(self(), :idle_timeout, state.idle_timeout_ms)
-
-    if state.status != :working do
-      state = %{state | status: :working, idle_timer: timer}
-      broadcast_ui_update(state)
+    if state.status in [:done, :error] do
       {:noreply, state}
     else
-      {:noreply, %{state | idle_timer: timer}}
+      state = cancel_idle_timer(state)
+      state = %{state | status: :needs_input}
+      broadcast_ui_update(state)
+      {:noreply, state}
     end
   end
 
   @impl true
-  def handle_info({:parser_event, _, %{type: type}}, state)
+  def handle_info({:parser_event, _, %{type: type} = event}, state)
+      when type in [:tool_call, :pre_tool_call] do
+    if state.status in [:done, :error] do
+      {:noreply, state}
+    else
+      # Tool starting — set working, NO idle timer (tool is still running)
+      state = cancel_idle_timer(state)
+
+      tool = Map.get(event, :tool, "unknown")
+      desc = Map.get(event, :description, "")
+      label = if desc != "" and desc != nil, do: "#{tool}: #{desc}", else: tool
+      state = add_activity(state, label)
+
+      # Track subagent lifecycle for Agent tools
+      state =
+        if tool == "Agent" do
+          agent_entry = %{
+            id: System.unique_integer([:positive]),
+            description: desc || "subagent",
+            status: :working,
+            started_at: DateTime.utc_now()
+          }
+
+          %{state | agents: state.agents ++ [agent_entry]}
+        else
+          state
+        end
+
+      state = %{state | status: :working}
+      broadcast_ui_update(state)
+      {:noreply, state}
+    end
+  end
+
+  @impl true
+  def handle_info({:parser_event, _, %{type: type} = event}, state)
       when type in [:tool_result, :post_tool_call] do
-    state = cancel_idle_timer(state)
-    timer = Process.send_after(self(), :idle_timeout, state.idle_timeout_ms)
-    {:noreply, %{state | idle_timer: timer}}
+    if state.status in [:done, :error] do
+      {:noreply, state}
+    else
+      tool = Map.get(event, :tool, "unknown")
+
+      # Mark first working agent as done when Agent tool completes
+      state =
+        if tool == "Agent" do
+          mark_first_working_agent_done(state)
+        else
+          state
+        end
+
+      # If we were :background and no more agents are working, go idle immediately
+      has_working_agents = Enum.any?(state.agents, &(&1.status == :working))
+
+      state =
+        if state.status == :background and not has_working_agents do
+          %{state | status: :idle, idle_timer: nil}
+        else
+          state
+        end
+
+      broadcast_ui_update(state)
+
+      # Tool finished — start idle timer (go idle if no new tool starts)
+      state = cancel_idle_timer(state)
+      timer = Process.send_after(self(), :idle_timeout, state.idle_timeout_ms)
+      {:noreply, %{state | idle_timer: timer}}
+    end
   end
 
   @impl true
   def handle_info({:parser_event, _, _}, state), do: {:noreply, state}
 
   @impl true
-  def handle_info({:summary, _session_id, summary}, state) do
-    entry = %{
-      type: :summary,
-      text: sanitize_utf8(summary.summary),
-      timestamp: summary.timestamp
-    }
-
-    activity = [entry | state.activity] |> Enum.take(100)
-    state = %{state | activity: activity}
-    broadcast_ui_update(state)
+  def handle_info({:summary, _session_id, _summary}, state) do
+    # Summaries from PTY output are too noisy — activity feed uses hook events instead
     {:noreply, state}
   end
 
@@ -164,9 +225,12 @@ defmodule Sam.Session.Server do
 
   @impl true
   def handle_info(:idle_timeout, state) do
-    # No output for @idle_timeout_ms — transition to idle
+    # No output for @idle_timeout_ms — transition based on subagent status
     if state.status == :working do
-      state = %{state | status: :idle, idle_timer: nil}
+      has_working_agents = Enum.any?(state.agents, &(&1.status == :working))
+
+      new_status = if has_working_agents, do: :background, else: :idle
+      state = %{state | status: new_status, idle_timer: nil}
       broadcast_ui_update(state)
       {:noreply, state}
     else
@@ -191,6 +255,29 @@ defmodule Sam.Session.Server do
   end
 
   ## Private helpers
+
+  defp mark_first_working_agent_done(state) do
+    {updated, _found} =
+      Enum.map_reduce(state.agents, false, fn agent, found ->
+        if not found and agent.status == :working do
+          {%{agent | status: :done}, true}
+        else
+          {agent, found}
+        end
+      end)
+
+    %{state | agents: updated}
+  end
+
+  defp add_activity(state, tool) do
+    entry = %{
+      type: :tool,
+      text: tool,
+      timestamp: DateTime.utc_now()
+    }
+
+    %{state | activity: [entry | state.activity] |> Enum.take(50)}
+  end
 
   defp cancel_idle_timer(%{idle_timer: nil} = state), do: state
 

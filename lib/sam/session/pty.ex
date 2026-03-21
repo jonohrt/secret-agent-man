@@ -44,13 +44,20 @@ defmodule Sam.Session.PTY do
         {:packet, 4}
       ])
 
+    port_number =
+      Application.get_env(:sam, SamWeb.Endpoint)[:http][:port] || 4000
+
     spawn_msg =
       Jason.encode!(%{
         cmd: "spawn",
         args: command,
         rows: rows,
         cols: cols,
-        workdir: workdir
+        workdir: workdir,
+        env: %{
+          "SAM_SESSION_ID" => session_id,
+          "SAM_PORT" => to_string(port_number)
+        }
       })
 
     Port.command(port, spawn_msg)

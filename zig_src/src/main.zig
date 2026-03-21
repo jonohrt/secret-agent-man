@@ -60,11 +60,17 @@ fn writePacketFd(fd: c_int, data: []const u8) void {
 
 // ── Command parsing ─────────────────────────────────────────────────────
 
+const EnvVar = struct {
+    key: []const u8,
+    value: []const u8,
+};
+
 const SpawnCmd = struct {
     args: []const []const u8,
     rows: u16,
     cols: u16,
     workdir: ?[]const u8,
+    env: []const EnvVar,
 };
 
 fn parseSpawnCmd(alloc: Allocator, data: []const u8) !SpawnCmd {
@@ -103,11 +109,30 @@ fn parseSpawnCmd(alloc: Allocator, data: []const u8) !SpawnCmd {
     const args = try alloc.alloc([]const u8, count);
     @memcpy(args, args_buf[0..count]);
 
+    // Parse optional env vars
+    var env_buf: [64]EnvVar = undefined;
+    var env_count: usize = 0;
+    if (root.get("env")) |env_val| {
+        if (env_val == .object) {
+            var it = env_val.object.iterator();
+            while (it.next()) |entry| {
+                if (env_count >= 64) break;
+                if (entry.value_ptr.* == .string) {
+                    env_buf[env_count] = .{ .key = entry.key_ptr.*, .value = entry.value_ptr.string };
+                    env_count += 1;
+                }
+            }
+        }
+    }
+    const env = try alloc.alloc(EnvVar, env_count);
+    @memcpy(env, env_buf[0..env_count]);
+
     return SpawnCmd{
         .args = args,
         .rows = rows,
         .cols = cols,
         .workdir = workdir,
+        .env = env,
     };
 }
 
@@ -139,6 +164,15 @@ fn doExec(cmd: SpawnCmd) noreturn {
     _ = c.setenv("LANG", "en_US.UTF-8", 1);
     _ = c.setenv("LC_ALL", "en_US.UTF-8", 1);
     _ = c.setenv("TERM", "xterm-256color", 1);
+
+    // Set custom environment variables
+    for (cmd.env) |ev| {
+        const key_z = dupeZ(ev.key);
+        const val_z = dupeZ(ev.value);
+        if (key_z != null and val_z != null) {
+            _ = c.setenv(key_z, val_z, 1);
+        }
+    }
 
     // Change working directory if specified
     if (cmd.workdir) |wd| {

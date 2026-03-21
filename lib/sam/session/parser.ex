@@ -58,6 +58,7 @@ defmodule Sam.Session.Parser do
     %{
       type: type,
       tool: event["tool"],
+      description: event["description"],
       file: event["file"],
       session_id: event["session_id"],
       timestamp: DateTime.utc_now()

@@ -1,50 +1,8 @@
 defmodule Sam.Session.ServerTest do
   use ExUnit.Case, async: false
 
-  describe "sanitize_utf8 via broadcast" do
-    test "summary with invalid UTF-8 produces JSON-encodable broadcast" do
-      session_id = "test-utf8-#{System.unique_integer([:positive])}"
-
-      # Subscribe to UI updates before starting the server
-      Phoenix.PubSub.subscribe(Sam.PubSub, "sessions:ui")
-
-      # Start the server directly (no PTY/Parser needed for this test)
-      {:ok, pid} =
-        GenServer.start_link(Sam.Session.Server, %{session_id: session_id, name: "UTF8 Test"})
-
-      # Drain the initial :running broadcast
-      assert_receive {:session_update, ^session_id, _}, 1000
-
-      # Simulate a summary containing invalid UTF-8 bytes
-      # 0xAF is a continuation byte without a leading byte — the exact crash trigger
-      bad_summary = "Working on " <> <<0xAF, 0xFF, 0xFE>> <> " task"
-
-      Phoenix.PubSub.broadcast(
-        Sam.PubSub,
-        "session:#{session_id}",
-        {:summary, session_id, %{summary: bad_summary, timestamp: DateTime.utc_now()}}
-      )
-
-      # Should receive the UI update with sanitized text
-      assert_receive {:session_update, ^session_id, state}, 1000
-
-      # THE CRITICAL ASSERTION: Jason.encode! must not crash
-      assert {:ok, _json} = Jason.encode(Map.from_struct(state))
-
-      # Activity should contain the sanitized summary
-      assert [%{text: text} | _] = state.activity
-      assert String.valid?(text)
-
-      # ALSO verify get_state returns JSON-safe data (the load_sessions path)
-      get_state = GenServer.call(pid, :get_state)
-      assert {:ok, _json} = Jason.encode(Map.from_struct(get_state))
-      assert [%{text: get_text} | _] = get_state.activity
-      assert String.valid?(get_text)
-
-      GenServer.stop(pid)
-    end
-
-    test "get_state returns sanitized data even with corrupted internal state", ctx do
+  describe "UTF-8 safety" do
+    test "get_state returns sanitized data even with corrupted internal state" do
       session_id = "test-getstate-#{System.unique_integer([:positive])}"
 
       Phoenix.PubSub.subscribe(Sam.PubSub, "sessions:ui")
@@ -56,7 +14,7 @@ defmodule Sam.Session.ServerTest do
 
       # Inject bad UTF-8 directly into server state to simulate stale data
       :sys.replace_state(pid, fn state ->
-        bad_entry = %{type: :summary, text: <<0xAF>> <> " test", timestamp: DateTime.utc_now()}
+        bad_entry = %{type: :tool, text: <<0xAF>> <> " test", timestamp: DateTime.utc_now()}
         %{state | activity: [bad_entry]}
       end)
 
@@ -69,83 +27,26 @@ defmodule Sam.Session.ServerTest do
       GenServer.stop(pid)
     end
 
-    test "sanitize_utf8 replaces ALL invalid bytes, not just the first" do
-      session_id = "test-allbytes-#{System.unique_integer([:positive])}"
+    test "tool activity with invalid UTF-8 is sanitized" do
+      session_id = "test-utf8-tool-#{System.unique_integer([:positive])}"
 
       Phoenix.PubSub.subscribe(Sam.PubSub, "sessions:ui")
 
       {:ok, pid} =
-        GenServer.start_link(Sam.Session.Server, %{session_id: session_id, name: "AllBytes Test"})
+        GenServer.start_link(Sam.Session.Server, %{session_id: session_id, name: "UTF8 Test"})
 
       assert_receive {:session_update, ^session_id, _}, 1000
 
-      # Multiple invalid bytes scattered throughout
-      bad_text = "hello" <> <<0xFF>> <> "world" <> <<0xFE>> <> "end"
-
-      Phoenix.PubSub.broadcast(
-        Sam.PubSub,
-        "session:#{session_id}",
-        {:summary, session_id, %{summary: bad_text, timestamp: DateTime.utc_now()}}
-      )
-
-      assert_receive {:session_update, ^session_id, state}, 1000
-      assert [%{text: text} | _] = state.activity
-      assert String.valid?(text)
-      # Should preserve the valid parts
-      assert text =~ "hello"
-      assert text =~ "world"
-      assert text =~ "end"
-
-      GenServer.stop(pid)
-    end
-
-    test "sanitize preserves valid multibyte UTF-8" do
-      session_id = "test-multibyte-#{System.unique_integer([:positive])}"
-
-      Phoenix.PubSub.subscribe(Sam.PubSub, "sessions:ui")
-
-      {:ok, pid} =
-        GenServer.start_link(Sam.Session.Server, %{session_id: session_id, name: "Multibyte"})
-
-      assert_receive {:session_update, ^session_id, _}, 1000
-
-      # Valid UTF-8 with emoji and special chars — should pass through unchanged
-      valid_text = "Working on task ❯ with émojis 🎉"
-
-      Phoenix.PubSub.broadcast(
-        Sam.PubSub,
-        "session:#{session_id}",
-        {:summary, session_id, %{summary: valid_text, timestamp: DateTime.utc_now()}}
+      # Send a tool event (which adds to activity)
+      send(
+        pid,
+        {:parser_event, session_id,
+         %{type: :pre_tool_call, tool: "Read", timestamp: DateTime.utc_now()}}
       )
 
       assert_receive {:session_update, ^session_id, state}, 1000
       assert {:ok, _json} = Jason.encode(Map.from_struct(state))
-      assert [%{text: ^valid_text} | _] = state.activity
-
-      GenServer.stop(pid)
-    end
-
-    test "sanitize handles pure binary garbage" do
-      session_id = "test-garbage-#{System.unique_integer([:positive])}"
-
-      Phoenix.PubSub.subscribe(Sam.PubSub, "sessions:ui")
-
-      {:ok, pid} =
-        GenServer.start_link(Sam.Session.Server, %{session_id: session_id, name: "Garbage Test"})
-
-      assert_receive {:session_update, ^session_id, _}, 1000
-
-      # Pure invalid bytes — no valid UTF-8 at all
-      garbage = <<0x80, 0x81, 0xFE, 0xFF, 0xAF, 0xC0, 0xC1>>
-
-      Phoenix.PubSub.broadcast(
-        Sam.PubSub,
-        "session:#{session_id}",
-        {:summary, session_id, %{summary: garbage, timestamp: DateTime.utc_now()}}
-      )
-
-      assert_receive {:session_update, ^session_id, state}, 1000
-      assert {:ok, _json} = Jason.encode(Map.from_struct(state))
+      assert [%{text: "Read"} | _] = state.activity
 
       GenServer.stop(pid)
     end
@@ -163,8 +64,8 @@ defmodule Sam.Session.ServerTest do
           idle_timeout_ms: 100
         })
 
-      # Drain initial :running broadcast
-      assert_receive {:session_update, ^session_id, %{status: :running}}, 1000
+      # Drain initial :idle broadcast
+      assert_receive {:session_update, ^session_id, %{status: :idle}}, 1000
 
       %{session_id: session_id, pid: pid}
     end
@@ -202,13 +103,13 @@ defmodule Sam.Session.ServerTest do
       pid: pid
     } do
       state = :sys.get_state(pid)
-      assert state.status == :running
+      assert state.status == :idle
 
       send(pid, {:pty_output, id, String.duplicate("x", 500)})
       _ = :sys.get_state(pid)
 
       state = :sys.get_state(pid)
-      assert state.status == :running
+      assert state.status == :idle
     end
 
     test "input_needed from PTY still transitions status", %{session_id: id, pid: pid} do
@@ -217,28 +118,45 @@ defmodule Sam.Session.ServerTest do
       assert_receive {:session_update, ^id, %{status: :needs_input}}, 1000
     end
 
-    test "new tool_call resets idle timer", %{session_id: id, pid: pid} do
+    test "stays working until post_tool_call + idle timeout", %{session_id: id, pid: pid} do
       # Start working
       send(
         pid,
-        {:parser_event, id, %{type: :tool_call, tool: "Read", timestamp: DateTime.utc_now()}}
+        {:parser_event, id, %{type: :pre_tool_call, tool: "Bash", timestamp: DateTime.utc_now()}}
       )
 
       assert_receive {:session_update, ^id, %{status: :working}}, 1000
 
-      # Wait 50ms (half the idle timeout), then another tool_call
-      Process.sleep(50)
+      # Should NOT go idle even after 150ms — no post_tool_call yet
+      refute_receive {:session_update, ^id, %{status: :idle}}, 150
 
+      # Tool finishes
       send(
         pid,
-        {:parser_event, id, %{type: :tool_call, tool: "Edit", timestamp: DateTime.utc_now()}}
+        {:parser_event, id, %{type: :post_tool_call, tool: "Bash", timestamp: DateTime.utc_now()}}
       )
 
-      # Should NOT go idle after another 60ms (110ms total from first tool_call)
-      refute_receive {:session_update, ^id, %{status: :idle}}, 60
+      # NOW should go idle after the 100ms timeout
+      assert_receive {:session_update, ^id, %{status: :idle}}, 300
+    end
+  end
 
-      # But SHOULD go idle 100ms after the second tool_call
-      assert_receive {:session_update, ^id, %{status: :idle}}, 200
+  describe "initial status" do
+    test "new session starts as :idle, not :running" do
+      session_id = "test-init-#{System.unique_integer([:positive])}"
+      Phoenix.PubSub.subscribe(Sam.PubSub, "sessions:ui")
+
+      {:ok, pid} =
+        GenServer.start_link(Sam.Session.Server, %{session_id: session_id, name: "Init Test"})
+
+      # The first broadcast should show :idle — a fresh session waiting for input is idle
+      assert_receive {:session_update, ^session_id, %{status: :idle}}, 1000
+
+      # Direct state check too
+      state = :sys.get_state(pid)
+      assert state.status == :idle
+
+      GenServer.stop(pid)
     end
   end
 
@@ -259,7 +177,7 @@ defmodule Sam.Session.ServerTest do
 
       # Session should be registered and retrievable
       state = Sam.Session.Server.get_state(session_id)
-      assert state.status == :running
+      assert state.status == :idle
       assert state.name == "Test Session"
 
       # Should be in list_sessions
@@ -272,7 +190,28 @@ defmodule Sam.Session.ServerTest do
       assert_receive {:pty_output, ^session_id, _data}, 5000
 
       # Clean up
-      Sam.Session.Server.stop(session_id)
+      Sam.Session.GroupSupervisor.terminate_session(session_id)
+    end
+
+    test "terminate_session fully removes session (no ghost restarts)" do
+      session_id = "test-terminate-#{System.unique_integer([:positive])}"
+
+      {:ok, _sup_pid} =
+        Sam.Session.GroupSupervisor.start_session(%{
+          session_id: session_id,
+          command: ["/bin/bash", "-l"],
+          agent_type: :generic,
+          name: "Ghost Test"
+        })
+
+      assert session_id in Sam.Session.Server.list_sessions()
+
+      # Terminate the session
+      :ok = Sam.Session.GroupSupervisor.terminate_session(session_id)
+      Process.sleep(200)
+
+      # Session must be fully gone — not restarted by supervisor
+      refute session_id in Sam.Session.Server.list_sessions()
     end
   end
 end

@@ -5,7 +5,7 @@ import Config
 config :sam, SamWeb.Endpoint,
   http: [ip: {127, 0, 0, 1}, port: 4002],
   secret_key_base: "4ywhIKLhiqx9ckMpHQcVbQkSRaik4MENoDTK4TJPYaKsj2pqGMoqpjVAxrHrOMjp",
-  server: false
+  server: true
 
 # Print only warnings and errors during test
 config :logger, level: :warning
@@ -25,4 +25,4 @@ config :wallaby,
   otp_app: :sam,
   driver: Wallaby.Chrome,
   screenshot_on_failure: true,
-  js_logger: :log
+  js_logger: false

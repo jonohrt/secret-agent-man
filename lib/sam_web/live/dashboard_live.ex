@@ -51,8 +51,16 @@ defmodule SamWeb.DashboardLive do
   end
 
   def handle_event("kill_session", %{"id" => session_id}, socket) do
-    Sam.Session.Server.stop(session_id)
-    {:noreply, socket}
+    Sam.Session.GroupSupervisor.terminate_session(session_id)
+
+    sessions = load_sessions()
+
+    selected =
+      if socket.assigns.selected_session == session_id,
+        do: List.first(Map.keys(sessions)),
+        else: socket.assigns.selected_session
+
+    {:noreply, assign(socket, sessions: sessions, selected_session: selected)}
   end
 
   def handle_event("create_session", params, socket) do
@@ -152,10 +160,18 @@ defmodule SamWeb.DashboardLive do
   end
 
   defp agent_adapter(:claude_code), do: Sam.Agents.ClaudeCode
+  defp agent_adapter(:mock), do: Sam.Agents.Mock
   defp agent_adapter(_), do: Sam.Agents.Generic
 
   defp selected_state(sessions, selected) do
     if selected, do: Map.get(sessions, selected), else: nil
+  end
+
+  defp active_agent_count(nil), do: 1
+
+  defp active_agent_count(state) do
+    subagent_count = state |> Map.get(:agents, []) |> Enum.count(&(&1.status == :working))
+    1 + subagent_count
   end
 
   defp status_class(nil), do: "idle"
@@ -425,7 +441,9 @@ defmodule SamWeb.DashboardLive do
         <div class="sam-panel">
           <div class="sam-panel-header">
             <span>AGENTS</span>
-            <span style="opacity: 0.5;">1 ACTIVE</span>
+            <span style="opacity: 0.5;">
+              {active_agent_count(selected_state(@sessions, @selected_session))} ACTIVE
+            </span>
           </div>
           <div class="sam-panel-body">
             <%= if @selected_session do %>
@@ -444,6 +462,17 @@ defmodule SamWeb.DashboardLive do
                     {agent_activity_text(state)}
                   </div>
                 </div>
+                <%= for agent <- Map.get(state, :agents, []) do %>
+                  <div class="agent-row">
+                    <div class="agent-row-top">
+                      <span class={"status-dot #{status_class(agent.status)}"}></span>
+                      <span class="agent-name">{agent.description}</span>
+                      <span class={"agent-status #{status_class(agent.status)}"}>
+                        {agent.status |> to_string() |> String.upcase()}
+                      </span>
+                    </div>
+                  </div>
+                <% end %>
               <% end %>
             <% end %>
           </div>

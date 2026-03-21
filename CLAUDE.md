@@ -21,7 +21,9 @@ Local web dashboard for managing multiple AI coding agent sessions. Elixir/Phoen
 ## Test Commands
 
 ```bash
-mix test                              # Run all tests
+mix test                              # Run all tests (E2E excluded by default)
+mix test --include e2e                # Run ALL tests including E2E browser tests (requires chromedriver)
+mix test test/features/               # Run only E2E tests
 mix test test/sam/session/server_test.exs  # Run specific test file
 mix test --failed                     # Re-run failures
 mix precommit                         # Full check: compile --warnings-as-errors, format, test
@@ -58,16 +60,17 @@ GroupSupervisor (one per session)
 
 ### Status State Machine
 ```
-:starting -> :running -> :working <-> :idle
-                           |
-                     :needs_input
-                           |
-                       :working
+:idle -> :working <-> :idle
+            |
+        :background (main idle, subagents still running)
+            |
+          :idle (last subagent completes)
 
-:working/:idle -> :done (exit 0) | :error (exit non-zero)
+:idle/:working -> :needs_input -> :working (user responds)
+:any -> :done (exit 0) | :error (exit non-zero)
 ```
 
-Status is driven by **JSONL transcript events** (tool_call → working, tool_result → idle timer), NOT by PTY output. PTY output is unreliable due to Claude Code's TUI redraws.
+Status is driven by **Claude Code hooks** (PreToolUse/PostToolUse) firing HTTP requests to SAM's `/api/hooks` endpoint. The PTY port passes `SAM_SESSION_ID` and `SAM_PORT` as env vars so hooks can identify the session. User pressing Enter also triggers `:working` immediately via `send_input` detection.
 
 ## Key Files
 
