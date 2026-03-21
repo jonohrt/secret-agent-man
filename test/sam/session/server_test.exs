@@ -160,6 +160,36 @@ defmodule Sam.Session.ServerTest do
     end
   end
 
+  describe "agent title fallback" do
+    test "agent entry gets fallback description when hook sends empty string" do
+      session_id = "test-agent-title-#{System.unique_integer([:positive])}"
+      opts = %{session_id: session_id}
+      pid = start_supervised!({Sam.Session.Server, opts})
+
+      event = %{
+        type: :tool_call,
+        tool: "Agent",
+        description: "",
+        file: nil,
+        session_id: session_id,
+        timestamp: DateTime.utc_now()
+      }
+
+      Phoenix.PubSub.broadcast(
+        Sam.PubSub,
+        "session:#{session_id}",
+        {:parser_event, session_id, event}
+      )
+
+      :sys.get_state(pid)
+
+      state = Sam.Session.Server.get_state(session_id)
+      agent = List.first(state.agents)
+      assert agent.description == "subagent"
+      assert agent.description != ""
+    end
+  end
+
   describe "session lifecycle" do
     test "creates a session via GroupSupervisor" do
       session_id = "test-server-#{System.unique_integer([:positive])}"

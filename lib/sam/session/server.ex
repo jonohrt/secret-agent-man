@@ -159,9 +159,15 @@ defmodule Sam.Session.Server do
       # Track subagent lifecycle for Agent tools
       state =
         if tool == "Agent" do
+          agent_desc =
+            case desc do
+              d when is_binary(d) and d != "" -> d
+              _ -> "subagent"
+            end
+
           agent_entry = %{
             id: System.unique_integer([:positive]),
-            description: desc || "subagent",
+            description: agent_desc,
             status: :working,
             started_at: DateTime.utc_now()
           }
