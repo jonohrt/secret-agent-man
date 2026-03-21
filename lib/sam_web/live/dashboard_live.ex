@@ -18,7 +18,7 @@ defmodule SamWeb.DashboardLive do
        sessions: sessions,
        selected_session: selected,
        show_new_dialog: false,
-       show_terminal: false,
+       show_terminal_modal: false,
        input_text: "",
        tick: 0,
        default_workdir: Sam.Settings.get(:default_workdir, File.cwd!()),
@@ -38,8 +38,8 @@ defmodule SamWeb.DashboardLive do
     {:noreply, assign(socket, show_new_dialog: !socket.assigns.show_new_dialog)}
   end
 
-  def handle_event("toggle_terminal", _params, socket) do
-    {:noreply, assign(socket, show_terminal: !socket.assigns.show_terminal)}
+  def handle_event("toggle_terminal_modal", _params, socket) do
+    {:noreply, assign(socket, show_terminal_modal: !socket.assigns.show_terminal_modal)}
   end
 
   def handle_event("send_input", %{"input" => text}, socket) do
@@ -453,8 +453,8 @@ defmodule SamWeb.DashboardLive do
                   <button type="submit" class="sam-btn-outline">SEND</button>
                 </form>
               <% else %>
-                <button class="sam-btn-outline" phx-click="toggle_terminal">
-                  {if @show_terminal, do: "HIDE TTY", else: "SHOW TTY"}
+                <button class="sam-btn-outline" phx-click="toggle_terminal_modal">
+                  {if @show_terminal_modal, do: "HIDE TTY", else: "SHOW TTY"}
                 </button>
                 <button
                   class="sam-btn-outline danger"
@@ -688,6 +688,21 @@ defmodule SamWeb.DashboardLive do
             </div>
           </section>
         </div>
+      <% end %>
+
+      <%!-- TERMINAL MODAL --%>
+      <%= if @selected_session do %>
+        <% state = selected_state(@sessions, @selected_session) %>
+        <%= if state && !state[:ghost] do %>
+          <.live_component
+            module={SamWeb.Components.TerminalModal}
+            id={"terminal-modal-#{@selected_session}"}
+            visible={@show_terminal_modal}
+            session_id={@selected_session}
+            session_name={state.name || @selected_session}
+            workdir={Map.get(state, :workdir) || "."}
+          />
+        <% end %>
       <% end %>
     </div>
     """
