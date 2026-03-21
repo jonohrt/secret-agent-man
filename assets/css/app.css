@@ -480,6 +480,36 @@ body::before {
   min-height: 0;
 }
 
+/* Panel header tabs */
+.panel-tabs {
+  gap: 0;
+  padding: 0 12px;
+}
+
+.panel-tab {
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  padding: 8px 12px;
+  font-family: var(--font-headline);
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+  color: var(--outline);
+  cursor: pointer;
+  transition: color 0.15s;
+}
+
+.panel-tab:hover {
+  color: var(--on-surface-variant);
+}
+
+.panel-tab.active {
+  color: var(--primary);
+  border-bottom-color: var(--primary);
+}
+
 /* ============================================
    TERMINAL PANEL
    ============================================ */
@@ -957,6 +987,20 @@ body::before {
 .activity-item .msg.summary {
   color: var(--on-surface);
   font-style: normal;
+}
+
+.activity-item .tool-count {
+  font-family: var(--font-mono);
+  font-size: 0.625rem;
+  font-weight: 700;
+  color: var(--primary);
+  background: rgba(175, 201, 234, 0.1);
+  border: 1px solid rgba(175, 201, 234, 0.2);
+  padding: 0 4px;
+  min-width: 16px;
+  text-align: center;
+  flex-shrink: 0;
+  line-height: 1.4;
 }
 
 /* Terminal Modal */

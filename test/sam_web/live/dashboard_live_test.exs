@@ -37,7 +37,7 @@ defmodule SamWeb.DashboardLiveTest do
   test "renders empty dashboard", %{conn: conn} do
     {:ok, _view, html} = live(conn, "/")
     assert html =~ "DEPLOY AGENT"
-    assert html =~ "ACTIVITY FEED"
+    assert html =~ "ACTIVITY"
     assert html =~ "AGENTS"
   end
 

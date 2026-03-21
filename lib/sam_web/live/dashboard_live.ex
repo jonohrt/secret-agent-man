@@ -41,10 +41,15 @@ defmodule SamWeb.DashboardLive do
     running_keys = for {id, s} <- sessions, !s[:ghost], do: id
     selected = List.first(running_keys) || List.first(Map.keys(sessions))
 
+    # Stable-ordered list of session IDs — prevents LiveView from
+    # destroying/recreating terminal hooks when Map iteration order shifts.
+    session_ids = sessions |> Map.keys() |> Enum.sort()
+
     socket =
       socket
       |> assign(
         sessions: sessions,
+        session_ids: session_ids,
         selected_session: selected,
         show_new_dialog: false,
         show_terminal_modal: false,
@@ -54,7 +59,8 @@ defmodule SamWeb.DashboardLive do
         mru_workdirs: Sam.Settings.get(:mru_workdirs, []),
         show_settings: false,
         summarizer_mode: detect_summarizer_mode(),
-        current_uptime: "00:00:00"
+        current_uptime: "00:00:00",
+        panel_view: :activity
       )
 
     socket =
@@ -103,7 +109,7 @@ defmodule SamWeb.DashboardLive do
       Sam.Session.GroupSupervisor.terminate_session(session_id)
     end
 
-    {:noreply, assign(socket, sessions: %{}, selected_session: nil)}
+    {:noreply, assign(socket, sessions: %{}, session_ids: [], selected_session: nil)}
   end
 
   def handle_event("kill_session", %{"id" => session_id}, socket) do
@@ -111,13 +117,15 @@ defmodule SamWeb.DashboardLive do
     Sam.Persistence.delete_session(session_id)
 
     sessions = load_sessions()
+    session_ids = Enum.filter(socket.assigns.session_ids, &(&1 != session_id))
 
     selected =
       if socket.assigns.selected_session == session_id,
-        do: List.first(Map.keys(sessions)),
+        do: List.first(session_ids),
         else: socket.assigns.selected_session
 
-    socket = assign(socket, sessions: sessions, selected_session: selected)
+    socket =
+      assign(socket, sessions: sessions, session_ids: session_ids, selected_session: selected)
 
     socket =
       if selected,
@@ -152,9 +160,14 @@ defmodule SamWeb.DashboardLive do
         |> Map.delete(session_id)
         |> Map.merge(load_sessions())
 
+      session_ids =
+        socket.assigns.session_ids
+        |> Enum.filter(&(&1 != session_id))
+        |> then(&(&1 ++ [new_session_id]))
+
       {:noreply,
        socket
-       |> assign(sessions: sessions, selected_session: new_session_id)
+       |> assign(sessions: sessions, session_ids: session_ids, selected_session: new_session_id)
        |> push_event("select_terminal", %{session_id: new_session_id})}
     else
       {:noreply, socket}
@@ -164,11 +177,17 @@ defmodule SamWeb.DashboardLive do
   def handle_event("dismiss_ghost", %{"id" => session_id}, socket) do
     Sam.Persistence.delete_session(session_id)
     sessions = Map.delete(socket.assigns.sessions, session_id)
-    {:noreply, assign(socket, sessions: sessions)}
+    session_ids = Enum.filter(socket.assigns.session_ids, &(&1 != session_id))
+    {:noreply, assign(socket, sessions: sessions, session_ids: session_ids)}
   end
 
   def handle_event("toggle_settings", _params, socket) do
     {:noreply, assign(socket, show_settings: !socket.assigns.show_settings)}
+  end
+
+  def handle_event("set_panel_view", %{"view" => view}, socket) do
+    panel_view = String.to_existing_atom(view)
+    {:noreply, assign(socket, panel_view: panel_view)}
   end
 
   def handle_event("save_settings", %{"default_workdir" => path}, socket) do
@@ -217,11 +236,13 @@ defmodule SamWeb.DashboardLive do
 
     Sam.Settings.add_mru_workdir(workdir)
     sessions = load_sessions()
+    session_ids = socket.assigns.session_ids ++ [session_id]
 
     {:noreply,
      socket
      |> assign(
        sessions: sessions,
+       session_ids: session_ids,
        selected_session: session_id,
        show_new_dialog: false,
        mru_workdirs: Sam.Settings.get(:mru_workdirs, [])
@@ -582,7 +603,7 @@ defmodule SamWeb.DashboardLive do
             <span class="live-dot"></span> VIEWING: main <span class="live-label">&#9654; LIVE</span>
           </div>
           <div
-            :for={{id, _state} <- @sessions}
+            :for={id <- @session_ids}
             :if={!@sessions[id][:ghost]}
             class="sam-terminal-body"
             id={"terminal-#{id}"}
@@ -606,8 +627,22 @@ defmodule SamWeb.DashboardLive do
 
         <%!-- ACTIVITY FEED (4 cols, top right) --%>
         <div class="sam-panel">
-          <div class="sam-panel-header">
-            <span>ACTIVITY FEED</span>
+          <div class="sam-panel-header panel-tabs">
+            <button
+              class={"panel-tab #{if @panel_view == :activity, do: "active"}"}
+              phx-click="set_panel_view"
+              phx-value-view="activity"
+            >
+              ACTIVITY
+            </button>
+            <button
+              class={"panel-tab #{if @panel_view == :sessions, do: "active"}"}
+              phx-click="set_panel_view"
+              phx-value-view="sessions"
+            >
+              SESSIONS
+            </button>
+            <span style="flex:1;"></span>
             <span style="opacity: 0.5;">LIVE</span>
           </div>
           <div class="sam-panel-body">
