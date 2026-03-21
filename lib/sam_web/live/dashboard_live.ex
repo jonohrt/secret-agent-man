@@ -11,6 +11,31 @@ defmodule SamWeb.DashboardLive do
     end
 
     sessions = load_sessions()
+    running_ids = Map.keys(sessions)
+
+    saved = Sam.Persistence.load_saved_sessions()
+
+    ghost_sessions =
+      saved
+      |> Enum.reject(fn s -> s.session_id in running_ids end)
+      |> Enum.reduce(%{}, fn s, acc ->
+        ghost = %{
+          session_id: s.session_id,
+          name: s.name || s.session_id,
+          status: :disconnected,
+          agent_type: Map.get(s, :agent_type, :claude_code),
+          workdir: Map.get(s, :workdir),
+          branch: nil,
+          activity: [],
+          agents: [],
+          started_at: nil,
+          ghost: true
+        }
+
+        Map.put(acc, s.session_id, ghost)
+      end)
+
+    sessions = Map.merge(ghost_sessions, sessions)
     selected = List.first(Map.keys(sessions))
 
     {:ok,
@@ -60,6 +85,7 @@ defmodule SamWeb.DashboardLive do
 
   def handle_event("kill_all", _params, socket) do
     for session_id <- Sam.Session.Server.list_sessions() do
+      Sam.Persistence.delete_session(session_id)
       Sam.Session.GroupSupervisor.terminate_session(session_id)
     end
 
@@ -68,6 +94,7 @@ defmodule SamWeb.DashboardLive do
 
   def handle_event("kill_session", %{"id" => session_id}, socket) do
     Sam.Session.GroupSupervisor.terminate_session(session_id)
+    Sam.Persistence.delete_session(session_id)
 
     sessions = load_sessions()
 
@@ -77,6 +104,43 @@ defmodule SamWeb.DashboardLive do
         else: socket.assigns.selected_session
 
     {:noreply, assign(socket, sessions: sessions, selected_session: selected)}
+  end
+
+  def handle_event("restart_session", %{"id" => session_id}, socket) do
+    ghost = Map.get(socket.assigns.sessions, session_id)
+
+    if ghost && ghost[:ghost] do
+      workdir = ghost.workdir || File.cwd!()
+      agent_type = ghost.agent_type || :claude_code
+
+      command = agent_command(agent_type, workdir, nil)
+      new_session_id = "session-#{System.unique_integer([:positive])}"
+
+      Sam.Session.GroupSupervisor.start_session(%{
+        session_id: new_session_id,
+        name: ghost.name,
+        agent_type: agent_type,
+        workdir: workdir,
+        command: command
+      })
+
+      Sam.Persistence.delete_session(session_id)
+
+      sessions =
+        socket.assigns.sessions
+        |> Map.delete(session_id)
+        |> Map.merge(load_sessions())
+
+      {:noreply, assign(socket, sessions: sessions, selected_session: new_session_id)}
+    else
+      {:noreply, socket}
+    end
+  end
+
+  def handle_event("dismiss_ghost", %{"id" => session_id}, socket) do
+    Sam.Persistence.delete_session(session_id)
+    sessions = Map.delete(socket.assigns.sessions, session_id)
+    {:noreply, assign(socket, sessions: sessions)}
   end
 
   def handle_event("toggle_settings", _params, socket) do
@@ -238,6 +302,7 @@ defmodule SamWeb.DashboardLive do
     1 + subagent_count
   end
 
+  defp status_class(:disconnected), do: "disconnected"
   defp status_class(nil), do: "idle"
   defp status_class(status), do: Atom.to_string(status)
 
@@ -397,12 +462,16 @@ defmodule SamWeb.DashboardLive do
       <div class="sam-tabs">
         <div
           :for={{id, state} <- @sessions}
-          class={"sam-tab #{if id == @selected_session, do: "active"}"}
-          phx-click="select_session"
+          class={"sam-tab #{if id == @selected_session, do: "active"} #{if state[:ghost], do: "ghost"}"}
+          phx-click={if state[:ghost], do: "restart_session", else: "select_session"}
           phx-value-id={id}
         >
           <span class={"status-dot #{status_class(state.status)}"}></span>
           {state.name || id}
+          <%= if state[:ghost] do %>
+            <span class="ghost-label">RESTART</span>
+            <button class="ghost-dismiss" phx-click="dismiss_ghost" phx-value-id={id}>✕</button>
+          <% end %>
         </div>
         <div class="sam-tab-actions">
           <button class="sam-btn-deploy" phx-click="toggle_new_dialog">+ DEPLOY AGENT</button>
