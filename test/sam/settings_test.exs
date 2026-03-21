@@ -22,7 +22,7 @@ defmodule Sam.SettingsTest do
 
   test "put and get round-trip", %{table: table} do
     Sam.Settings.put(table, :default_workdir, "/Users/johrt/Code/umbrella")
-    assert Sam.Settings.get(table, :default_workdir) == "/Users/johrt/Code/umbrella"
+    assert Sam.Settings.get(table, :default_workdir, nil) == "/Users/johrt/Code/umbrella"
   end
 
   test "mru_workdirs capped at 5 and deduped", %{table: table} do

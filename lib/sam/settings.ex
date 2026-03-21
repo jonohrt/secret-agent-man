@@ -10,12 +10,8 @@ defmodule Sam.Settings do
   # Zero/one-arg forms without a table reference use the global DETS table (:sam_settings).
   # Forms with a table reference as the first argument accept any DETS table, used in tests.
 
-  # Global API: get(key) -> value | nil
-  def get(key), do: dets_get(:sam_settings, key, nil)
-
-  # Test API: get(table, key) -> value | nil
-  # NOTE: get(table, key, default) is the 3-arg form below; this 2-arg form uses nil as default.
-  def get(table, key), do: dets_get(table, key, nil)
+  # Global API: get(key, default \\ nil) -> value | default
+  def get(key, default \\ nil), do: dets_get(:sam_settings, key, default)
 
   # Test API: get(table, key, default)
   def get(table, key, default), do: dets_get(table, key, default)
