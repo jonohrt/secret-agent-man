@@ -24,7 +24,8 @@ defmodule SamWeb.DashboardLive do
        default_workdir: Sam.Settings.get(:default_workdir, File.cwd!()),
        mru_workdirs: Sam.Settings.get(:mru_workdirs, []),
        show_settings: false,
-       ollama_available: Sam.LLM.OllamaClient.available?()
+       ollama_available: Sam.LLM.OllamaClient.available?(),
+       current_uptime: "00:00:00"
      )}
   end
 
@@ -179,7 +180,13 @@ defmodule SamWeb.DashboardLive do
 
   @impl true
   def handle_info(:tick, socket) do
-    {:noreply, assign(socket, tick: socket.assigns.tick + 1)}
+    # Compute uptime string on each tick — LiveView change tracking won't
+    # re-evaluate format_uptime() in the template since its input (the session
+    # map) doesn't change. So we store the formatted string as an assign.
+    selected = socket.assigns.selected_session
+    state = selected && Map.get(socket.assigns.sessions, selected)
+    uptime = format_uptime(state)
+    {:noreply, assign(socket, tick: socket.assigns.tick + 1, current_uptime: uptime)}
   end
 
   # -- Helpers --
@@ -414,9 +421,7 @@ defmodule SamWeb.DashboardLive do
                 {state.status |> to_string() |> String.upcase()}
               </div>
               <span class="sam-status-meta">
-                {Map.get(state, :workdir) || "~"} &bull; {Map.get(state, :branch) || "no branch"} &bull; {format_uptime(
-                  state
-                )}
+                {Map.get(state, :workdir) || "~"} &bull; {Map.get(state, :branch) || "no branch"} &bull; {@current_uptime}
               </span>
             </div>
             <div class="sam-status-actions">
