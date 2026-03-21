@@ -31,6 +31,9 @@ version_gte() {
   local need_major="${need%%.*}" need_minor="${need#*.}"
   [[ "$have_major" == "$have" ]] && have_minor=0
   [[ "$need_major" == "$need" ]] && need_minor=0
+  # Strip any further segments (e.g. 1.15.7 -> 15, not 15.7)
+  have_minor="${have_minor%%.*}"
+  need_minor="${need_minor%%.*}"
 
   if (( have_major > need_major )); then return 0; fi
   if (( have_major < need_major )); then return 1; fi
@@ -90,7 +93,12 @@ check_erlang() {
 
   if ask "Install Erlang/OTP? ($cmd)"; then
     eval "$cmd"
-    ok "Erlang/OTP installed"
+    if command -v erl &>/dev/null; then
+      ok "Erlang/OTP installed"
+    else
+      fail "Erlang/OTP install succeeded but 'erl' not found on PATH"
+      MISSING_CRITICAL=1
+    fi
   else
     fail "Erlang/OTP is required"
     MISSING_CRITICAL=1
@@ -121,7 +129,12 @@ check_elixir() {
 
   if ask "Install Elixir? ($cmd)"; then
     eval "$cmd"
-    ok "Elixir installed"
+    if command -v elixir &>/dev/null; then
+      ok "Elixir installed"
+    else
+      fail "Elixir install succeeded but 'elixir' not found on PATH"
+      MISSING_CRITICAL=1
+    fi
   else
     fail "Elixir is required"
     MISSING_CRITICAL=1
@@ -145,7 +158,12 @@ check_zig() {
 
   if ask "Install Zig? ($cmd)"; then
     eval "$cmd"
-    ok "Zig installed"
+    if command -v zig &>/dev/null; then
+      ok "Zig installed"
+    else
+      fail "Zig install succeeded but 'zig' not found on PATH"
+      MISSING_CRITICAL=1
+    fi
   else
     fail "Zig is required (builds the PTY port)"
     MISSING_CRITICAL=1
@@ -169,7 +187,12 @@ check_node() {
 
   if ask "Install Node.js? ($cmd)"; then
     eval "$cmd"
-    ok "Node.js installed"
+    if command -v node &>/dev/null; then
+      ok "Node.js installed"
+    else
+      fail "Node.js install succeeded but 'node' not found on PATH"
+      MISSING_CRITICAL=1
+    fi
   else
     fail "Node.js is required (asset compilation)"
     MISSING_CRITICAL=1
