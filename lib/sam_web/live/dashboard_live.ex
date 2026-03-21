@@ -36,27 +36,41 @@ defmodule SamWeb.DashboardLive do
       end)
 
     sessions = Map.merge(ghost_sessions, sessions)
-    selected = List.first(Map.keys(sessions))
 
-    {:ok,
-     assign(socket,
-       sessions: sessions,
-       selected_session: selected,
-       show_new_dialog: false,
-       show_terminal_modal: false,
-       input_text: "",
-       tick: 0,
-       default_workdir: Sam.Settings.get(:default_workdir, File.cwd!()),
-       mru_workdirs: Sam.Settings.get(:mru_workdirs, []),
-       show_settings: false,
-       ollama_available: Sam.LLM.OllamaClient.available?(),
-       current_uptime: "00:00:00"
-     )}
+    # Prefer selecting a running (non-ghost) session over a ghost
+    running_keys = for {id, s} <- sessions, !s[:ghost], do: id
+    selected = List.first(running_keys) || List.first(Map.keys(sessions))
+
+    socket =
+      socket
+      |> assign(
+        sessions: sessions,
+        selected_session: selected,
+        show_new_dialog: false,
+        show_terminal_modal: false,
+        input_text: "",
+        tick: 0,
+        default_workdir: Sam.Settings.get(:default_workdir, File.cwd!()),
+        mru_workdirs: Sam.Settings.get(:mru_workdirs, []),
+        show_settings: false,
+        summarizer_mode: detect_summarizer_mode(),
+        current_uptime: "00:00:00"
+      )
+
+    socket =
+      if selected && connected?(socket),
+        do: push_event(socket, "select_terminal", %{session_id: selected}),
+        else: socket
+
+    {:ok, socket}
   end
 
   @impl true
   def handle_event("select_session", %{"id" => id}, socket) do
-    {:noreply, assign(socket, selected_session: id)}
+    {:noreply,
+     socket
+     |> assign(selected_session: id)
+     |> push_event("select_terminal", %{session_id: id})}
   end
 
   def handle_event("toggle_new_dialog", _params, socket) do
@@ -103,7 +117,14 @@ defmodule SamWeb.DashboardLive do
         do: List.first(Map.keys(sessions)),
         else: socket.assigns.selected_session
 
-    {:noreply, assign(socket, sessions: sessions, selected_session: selected)}
+    socket = assign(socket, sessions: sessions, selected_session: selected)
+
+    socket =
+      if selected,
+        do: push_event(socket, "select_terminal", %{session_id: selected}),
+        else: socket
+
+    {:noreply, socket}
   end
 
   def handle_event("restart_session", %{"id" => session_id}, socket) do
@@ -131,7 +152,10 @@ defmodule SamWeb.DashboardLive do
         |> Map.delete(session_id)
         |> Map.merge(load_sessions())
 
-      {:noreply, assign(socket, sessions: sessions, selected_session: new_session_id)}
+      {:noreply,
+       socket
+       |> assign(sessions: sessions, selected_session: new_session_id)
+       |> push_event("select_terminal", %{session_id: new_session_id})}
     else
       {:noreply, socket}
     end
@@ -195,12 +219,14 @@ defmodule SamWeb.DashboardLive do
     sessions = load_sessions()
 
     {:noreply,
-     assign(socket,
+     socket
+     |> assign(
        sessions: sessions,
        selected_session: session_id,
        show_new_dialog: false,
        mru_workdirs: Sam.Settings.get(:mru_workdirs, [])
-     )}
+     )
+     |> push_event("select_terminal", %{session_id: session_id})}
   end
 
   @impl true
@@ -331,6 +357,16 @@ defmodule SamWeb.DashboardLive do
   defp activity_msg_class(%{type: :system}), do: "system"
   defp activity_msg_class(%{type: :agent_event}), do: "agent-event"
   defp activity_msg_class(_), do: ""
+
+  defp detect_summarizer_mode do
+    case Sam.LLM.Ollama.check_availability() do
+      {:ok, model} -> model
+      {:error, _} -> nil
+    end
+  end
+
+  defp summarizer_mode_label(nil), do: "SUMMARIZER: HEURISTIC"
+  defp summarizer_mode_label(model), do: "SUMMARIZER: OLLAMA (#{model})"
 
   # Strip terminal control chars and block drawing chars from raw PTY summary output.
   # Ensures valid UTF-8 first to prevent crashes in String.replace.
@@ -541,21 +577,23 @@ defmodule SamWeb.DashboardLive do
       <%!-- BENTO GRID --%>
       <div class="sam-bento">
         <%!-- TERMINAL (8 cols, spans 2 rows) --%>
-        <div class="sam-panel sam-terminal">
+        <div class="sam-panel sam-terminal" data-selected-session={@selected_session}>
           <div class="sam-terminal-indicator">
             <span class="live-dot"></span> VIEWING: main <span class="live-label">&#9654; LIVE</span>
           </div>
-          <%= if @selected_session do %>
+          <div
+            :for={{id, _state} <- @sessions}
+            :if={!@sessions[id][:ghost]}
+            class="sam-terminal-body"
+            id={"terminal-#{id}"}
+            phx-hook="Terminal"
+            phx-update="ignore"
+            data-session-id={id}
+          >
+          </div>
+          <%= if map_size(@sessions) == 0 or !@selected_session do %>
             <div
-              class="sam-terminal-body"
-              id={"terminal-#{@selected_session}"}
-              phx-hook="Terminal"
-              phx-update="ignore"
-              data-session-id={@selected_session}
-            >
-            </div>
-          <% else %>
-            <div
+              id="terminal-placeholder"
               class="sam-terminal-body"
               style="display: flex; align-items: center; justify-content: center;"
             >
@@ -573,9 +611,9 @@ defmodule SamWeb.DashboardLive do
             <span style="opacity: 0.5;">LIVE</span>
           </div>
           <div class="sam-panel-body">
-            <%= unless @ollama_available do %>
+            <%= unless @summarizer_mode do %>
               <div class="ollama-nudge">
-                ⚡ Install
+                Install
                 <a
                   href="https://ollama.com"
                   target="_blank"
@@ -594,6 +632,9 @@ defmodule SamWeb.DashboardLive do
                   class="activity-item"
                 >
                   <span class="time">{format_time(item.timestamp)}</span>
+                  <%= if Map.get(item, :tool_count, 0) > 0 do %>
+                    <span class="tool-count">{item.tool_count}</span>
+                  <% end %>
                   <span class={"msg #{activity_msg_class(item)}"}>{sanitize_text(item.text)}</span>
                 </div>
               <% end %>
@@ -647,9 +688,9 @@ defmodule SamWeb.DashboardLive do
       <footer class="sam-footer">
         <span>
           <span class="sam-footer-dot" style="background: var(--phosphor-green);"></span>
-          {map_size(@sessions)} SESSIONS &bull; THEME: COMMAND
+          {Enum.count(@sessions, fn {_id, s} -> !s[:ghost] end)} SESSIONS &bull; THEME: COMMAND
         </span>
-        <span></span>
+        <span>{summarizer_mode_label(@summarizer_mode)}</span>
       </footer>
 
       <%!-- SESSION CREATION MODAL --%>

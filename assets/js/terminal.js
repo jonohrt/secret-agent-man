@@ -4,16 +4,26 @@ import { FitAddon } from '@xterm/addon-fit'
 import { WebglAddon } from '@xterm/addon-webgl'
 import { Socket } from 'phoenix'
 
+// Shared socket for all terminal instances
+let sharedSocket = null
+function getSocket() {
+  if (!sharedSocket) {
+    sharedSocket = new Socket('/socket', { params: {} })
+    sharedSocket.connect()
+  }
+  return sharedSocket
+}
+
 const TerminalHook = {
   mounted() {
     const sessionId = this.el.dataset.sessionId
-    const container = this.el.querySelector('#terminal') || this.el
+    const container = this.el
 
     this.term = new Terminal({
       theme: {
         background: '#020f1e',
         foreground: '#d6e4f9',
-        cursor: '#22c55e',
+        cursor: '#020f1e',
         cursorAccent: '#020f1e',
         selectionBackground: 'rgba(175, 201, 234, 0.3)',
         black: '#061423',
@@ -27,7 +37,7 @@ const TerminalHook = {
       },
       fontFamily: "'Courier New', 'Menlo', monospace",
       fontSize: 13,
-      cursorBlink: true,
+      cursorBlink: false,
     })
 
     this.fitAddon = new FitAddon()
@@ -40,20 +50,20 @@ const TerminalHook = {
       console.warn('WebGL addon not available, using canvas renderer')
     }
 
-    this.fitAddon.fit()
-
     // Connect to Phoenix channel
-    const socket = new Socket('/socket', { params: {} })
-    socket.connect()
+    const socket = getSocket()
 
     this.channel = socket.channel(`terminal:${sessionId}`, {})
     this.channel.join()
       .receive('ok', () => {
         console.log(`Connected to terminal:${sessionId}`)
         // Send current terminal size so PTY resizes and redraws
-        const dims = this.fitAddon.proposeDimensions()
-        if (dims) {
-          this.channel.push('resize', { cols: dims.cols, rows: dims.rows })
+        if (this.el.style.display !== 'none') {
+          this.fitAddon.fit()
+          const dims = this.fitAddon.proposeDimensions()
+          if (dims) {
+            this.channel.push('resize', { cols: dims.cols, rows: dims.rows })
+          }
         }
       })
       .receive('error', (resp) => console.error('Failed to join', resp))
@@ -79,19 +89,51 @@ const TerminalHook = {
       this.channel.push('resize', { cols, rows })
     })
 
-    // Fit on window resize
-    this._resizeHandler = () => this.fitAddon.fit()
+    // Fit on window resize (only if visible)
+    this._resizeHandler = () => {
+      if (this.el.style.display !== 'none') {
+        this.fitAddon.fit()
+      }
+    }
     window.addEventListener('resize', this._resizeHandler)
+
+    // Listen for tab selection events
+    this._selectHandler = (e) => {
+      const selectedId = e.detail.session_id
+      if (selectedId === sessionId) {
+        this.el.style.display = ''
+        // Refit after becoming visible (needs a frame for layout)
+        requestAnimationFrame(() => {
+          this.fitAddon.fit()
+          this.term.focus()
+        })
+      } else {
+        this.el.style.display = 'none'
+      }
+    }
+    window.addEventListener('phx:select_terminal', this._selectHandler)
+
+    // Check if this terminal should be visible on initial mount
+    const panel = this.el.closest('[data-selected-session]')
+    const isSelected = panel && panel.dataset.selectedSession === sessionId
+    if (!isSelected) {
+      this.el.style.display = 'none'
+    } else {
+      requestAnimationFrame(() => {
+        this.fitAddon.fit()
+        this.term.focus()
+      })
+    }
 
     // Focus terminal on click so Vimium enters Insert Mode
     container.addEventListener('click', () => this.term.focus())
-    this.term.focus()
   },
 
   destroyed() {
     if (this.channel) this.channel.leave()
     if (this.term) this.term.dispose()
     if (this._resizeHandler) window.removeEventListener('resize', this._resizeHandler)
+    if (this._selectHandler) window.removeEventListener('phx:select_terminal', this._selectHandler)
   }
 }
 
