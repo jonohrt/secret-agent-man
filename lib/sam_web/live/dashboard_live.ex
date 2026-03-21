@@ -1,6 +1,8 @@
 defmodule SamWeb.DashboardLive do
   use SamWeb, :live_view
 
+  @notify_statuses ~w(needs_input done error)a
+
   @impl true
   def mount(_params, _session, socket) do
     if connected?(socket) do
@@ -128,6 +130,21 @@ defmodule SamWeb.DashboardLive do
       agents: new_state.agents
     }
 
+    # Check for notification-worthy transition
+    old_status = get_in(socket.assigns.sessions, [session_id, :status])
+    new_status = new_state.status
+
+    socket =
+      if new_status != old_status and new_status in @notify_statuses do
+        push_event(socket, "notify", %{
+          status: to_string(new_status),
+          session_name: new_state.name || session_id,
+          session_id: session_id
+        })
+      else
+        socket
+      end
+
     sessions = Map.put(socket.assigns.sessions, session_id, session_map)
     # Bump a counter to force LiveView to re-diff the template
     tick = Map.get(socket.assigns, :tick, 0) + 1
@@ -243,7 +260,7 @@ defmodule SamWeb.DashboardLive do
   @impl true
   def render(assigns) do
     ~H"""
-    <div class="sam-shell">
+    <div class="sam-shell" id="sam-dashboard" phx-hook="Notifications">
       <%!-- TOP NAV --%>
       <nav class="sam-topnav">
         <div class="sam-logo">
@@ -278,6 +295,25 @@ defmodule SamWeb.DashboardLive do
           </div>
         </div>
         <div class="sam-topnav-actions">
+          <button
+            class="sam-topnav-btn"
+            onclick="window.samToggleSound && window.samToggleSound(this)"
+          >
+            <svg
+              width="14"
+              height="14"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.8"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            >
+              <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" />
+              <path d="M15.54 8.46a5 5 0 0 1 0 7.07" />
+            </svg>
+            SOUND
+          </button>
           <button class="sam-topnav-btn">
             <svg
               width="14"
