@@ -360,4 +360,68 @@ defmodule SamWeb.Features.StatusIndicatorTest do
       |> assert_has(status_badge("WORKING"))
     end
   end
+
+  # ============================================================
+  # Session lifecycle (tests 16–18)
+  # ============================================================
+
+  describe "session lifecycle" do
+    test "terminate removes session from dashboard", %{session: session} do
+      _sid = start_mock_session()
+
+      session =
+        session
+        |> visit("/")
+        |> assert_has(css(".sam-footer", text: "1 SESSION"))
+
+      # Click TERMINATE button
+      session
+      |> find(css("button", text: "TERMINATE"))
+      |> Wallaby.Element.click()
+
+      # Session should be gone
+      session
+      |> assert_has(css(".sam-footer", text: "0 SESSIONS"))
+    end
+
+    test "kill all removes all sessions from dashboard", %{session: session} do
+      _sid1 = start_mock_session()
+      _sid2 = start_mock_session()
+
+      session =
+        session
+        |> visit("/")
+        |> assert_has(css(".sam-footer", text: "2 SESSIONS"))
+
+      # Click KILL ALL button
+      session
+      |> find(css("button", text: "KILL ALL"))
+      |> Wallaby.Element.click()
+
+      # Should show 0 sessions
+      session
+      |> assert_has(css(".sam-footer", text: "0 SESSIONS"))
+    end
+
+    test "terminate does not create ghost sessions", %{session: session} do
+      sid = start_mock_session()
+
+      session =
+        session
+        |> visit("/")
+        |> assert_has(css(".sam-footer", text: "1 SESSION"))
+
+      # Click TERMINATE
+      session
+      |> find(css("button", text: "TERMINATE"))
+      |> Wallaby.Element.click()
+
+      # Wait to ensure no restart
+      Process.sleep(2_000)
+
+      # Still 0 sessions — no ghost restart by supervisor
+      session
+      |> assert_has(css(".sam-footer", text: "0 SESSIONS"))
+    end
+  end
 end

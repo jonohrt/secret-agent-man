@@ -50,6 +50,14 @@ defmodule SamWeb.DashboardLive do
     {:noreply, socket}
   end
 
+  def handle_event("kill_all", _params, socket) do
+    for session_id <- Sam.Session.Server.list_sessions() do
+      Sam.Session.GroupSupervisor.terminate_session(session_id)
+    end
+
+    {:noreply, assign(socket, sessions: %{}, selected_session: nil)}
+  end
+
   def handle_event("kill_session", %{"id" => session_id}, socket) do
     Sam.Session.GroupSupervisor.terminate_session(session_id)
 
@@ -285,7 +293,7 @@ defmodule SamWeb.DashboardLive do
             </svg>
             SETTINGS
           </button>
-          <button class="sam-topnav-btn danger">
+          <button class="sam-topnav-btn danger" phx-click="kill_all">
             <svg
               width="14"
               height="14"
