@@ -16,8 +16,29 @@ defmodule Sam.PersistenceTest do
   end
 
   test "load_saved_sessions returns all entries", %{table: table} do
-    :dets.insert(table, {"session-1", %{session_id: "session-1", name: "Test 1", workdir: "/tmp", agent_type: :claude_code, status: :idle}})
-    :dets.insert(table, {"session-2", %{session_id: "session-2", name: "Test 2", workdir: "/home", agent_type: :claude_code, status: :working}})
+    :dets.insert(
+      table,
+      {"session-1",
+       %{
+         session_id: "session-1",
+         name: "Test 1",
+         workdir: "/tmp",
+         agent_type: :claude_code,
+         status: :idle
+       }}
+    )
+
+    :dets.insert(
+      table,
+      {"session-2",
+       %{
+         session_id: "session-2",
+         name: "Test 2",
+         workdir: "/home",
+         agent_type: :claude_code,
+         status: :working
+       }}
+    )
 
     sessions = Sam.Persistence.load_saved_sessions(table)
     assert length(sessions) == 2
