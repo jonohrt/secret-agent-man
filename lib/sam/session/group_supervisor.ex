@@ -40,6 +40,7 @@ defmodule Sam.Session.GroupSupervisor do
   def init(opts) do
     session_id = Map.fetch!(opts, :session_id)
     command = Map.fetch!(opts, :command)
+    claude_session_id = Map.get(opts, :claude_session_id)
 
     children = [
       %{
@@ -58,7 +59,13 @@ defmodule Sam.Session.GroupSupervisor do
         id: Sam.Session.TranscriptWatcher,
         start:
           {Sam.Session.TranscriptWatcher, :start_link,
-           [%{session_id: session_id, workdir: Map.get(opts, :workdir)}]}
+           [
+             %{
+               session_id: session_id,
+               workdir: Map.get(opts, :workdir),
+               claude_session_id: claude_session_id
+             }
+           ]}
       },
       %{
         id: Sam.Session.PTY,

@@ -29,6 +29,7 @@ defmodule SamWeb.DashboardLive do
           activity: [],
           agents: [],
           started_at: nil,
+          summary: "Disconnected",
           ghost: true
         }
 
@@ -142,7 +143,7 @@ defmodule SamWeb.DashboardLive do
       workdir = ghost.workdir || File.cwd!()
       agent_type = ghost.agent_type || :claude_code
 
-      command = agent_command(agent_type, workdir, nil)
+      {command, claude_session_id} = agent_command(agent_type, workdir, nil)
       new_session_id = "session-#{System.unique_integer([:positive])}"
 
       Sam.Session.GroupSupervisor.start_session(%{
@@ -150,7 +151,8 @@ defmodule SamWeb.DashboardLive do
         name: ghost.name,
         agent_type: agent_type,
         workdir: workdir,
-        command: command
+        command: command,
+        claude_session_id: claude_session_id
       })
 
       Sam.Persistence.delete_session(session_id)
@@ -223,7 +225,7 @@ defmodule SamWeb.DashboardLive do
     prompt = params["prompt"]
     prompt = if prompt == "", do: nil, else: prompt
 
-    command = agent_command(agent_type, workdir, prompt)
+    {command, claude_session_id} = agent_command(agent_type, workdir, prompt)
     session_id = "session-#{System.unique_integer([:positive])}"
 
     Sam.Session.GroupSupervisor.start_session(%{
@@ -231,7 +233,8 @@ defmodule SamWeb.DashboardLive do
       name: params["name"] || session_id,
       agent_type: agent_type,
       workdir: workdir,
-      command: command
+      command: command,
+      claude_session_id: claude_session_id
     })
 
     Sam.Settings.add_mru_workdir(workdir)
@@ -374,9 +377,28 @@ defmodule SamWeb.DashboardLive do
 
   defp agent_activity_text(_), do: "Awaiting directives"
 
-  defp raw_summary_text(%{activity: [latest | _]}), do: latest.text
-  defp raw_summary_text(%{summary: summary}) when is_binary(summary) and summary != "", do: summary
-  defp raw_summary_text(_), do: "Awaiting directives"
+  # Session card summary — only show LLM-generated summaries, not heuristic tool labels
+  defp session_summary_text(%{activity: activity}) when is_list(activity) do
+    activity
+    |> Enum.find(fn entry -> Map.get(entry, :source) == :ollama end)
+    |> case do
+      %{text: text} -> sanitize_text(text)
+      nil -> "Awaiting summary..."
+    end
+  end
+
+  defp session_summary_text(_), do: "Awaiting summary..."
+
+  defp raw_session_summary_text(%{activity: activity}) when is_list(activity) do
+    activity
+    |> Enum.find(fn entry -> Map.get(entry, :source) == :ollama end)
+    |> case do
+      %{text: text} -> text
+      nil -> "Awaiting summary..."
+    end
+  end
+
+  defp raw_session_summary_text(_), do: "Awaiting summary..."
 
   defp activity_msg_class(%{type: :summary}), do: "summary"
   defp activity_msg_class(%{type: :system}), do: "system"
@@ -522,14 +544,15 @@ defmodule SamWeb.DashboardLive do
       <%!-- TAB BAR --%>
       <div class="sam-tabs">
         <div
-          :for={{id, state} <- @sessions}
-          class={"sam-tab #{if id == @selected_session, do: "active"} #{if state[:ghost], do: "ghost"}"}
-          phx-click={if state[:ghost], do: "restart_session", else: "select_session"}
+          :for={id <- @session_ids}
+          :if={@sessions[id]}
+          class={"sam-tab #{if id == @selected_session, do: "active"} #{if @sessions[id][:ghost], do: "ghost"}"}
+          phx-click={if @sessions[id][:ghost], do: "restart_session", else: "select_session"}
           phx-value-id={id}
         >
-          <span class={"status-dot #{status_class(state.status)}"}></span>
-          {state.name || id}
-          <%= if state[:ghost] do %>
+          <span class={"status-dot #{status_class(@sessions[id].status)}"}></span>
+          {@sessions[id].name || id}
+          <%= if @sessions[id][:ghost] do %>
             <span class="ghost-label">RESTART</span>
             <button class="ghost-dismiss" phx-click="dismiss_ghost" phx-value-id={id}>✕</button>
           <% end %>
@@ -675,7 +698,9 @@ defmodule SamWeb.DashboardLive do
                     <%= if Map.get(item, :tool_count, 0) > 0 do %>
                       <span class="tool-count">{item.tool_count}</span>
                     <% end %>
-                    <span class={"msg #{activity_msg_class(item)}"} title={item.text}>{sanitize_text(item.text)}</span>
+                    <span class={"msg #{activity_msg_class(item)}"} title={item.text}>
+                      {sanitize_text(item.text)}
+                    </span>
                   </div>
                 <% end %>
               <% end %>
@@ -692,8 +717,8 @@ defmodule SamWeb.DashboardLive do
                   <span class="session-card-name">{state.name || id}</span>
                   <span class="session-card-time">{format_uptime(state)}</span>
                 </div>
-                <div class="session-card-summary" title={raw_summary_text(state)}>
-                  {agent_activity_text(state)}
+                <div class="session-card-summary" title={raw_session_summary_text(state)}>
+                  {session_summary_text(state)}
                 </div>
               </div>
             <% end %>
