@@ -3,54 +3,6 @@ defmodule Sam.Session.TranscriptWatcherTest do
 
   describe "JSONL file discovery" do
     @tag :tmp_dir
-    test "picks the most recently modified JSONL file", %{tmp_dir: tmp_dir} do
-      session_id = "test-discovery-#{System.unique_integer([:positive])}"
-
-      project_dir = Path.join(tmp_dir, "project")
-      File.mkdir_p!(project_dir)
-
-      # Old session file with old mtime
-      old_jsonl = Path.join(project_dir, "old-session.jsonl")
-      File.write!(old_jsonl, "")
-      File.touch!(old_jsonl, {{2025, 1, 1}, {0, 0, 0}})
-
-      # Recent file (the one we want picked)
-      new_jsonl = Path.join(project_dir, "new-session.jsonl")
-      File.write!(new_jsonl, "")
-
-      Phoenix.PubSub.subscribe(Sam.PubSub, "session:#{session_id}")
-
-      {:ok, pid} =
-        GenServer.start_link(Sam.Session.TranscriptWatcher, %{
-          session_id: session_id,
-          workdir: nil,
-          _test_project_dir: project_dir
-        })
-
-      # Watcher should find the most recently modified file
-      Process.sleep(1500)
-      state = :sys.get_state(pid)
-      assert state.path == new_jsonl
-
-      # Append data and verify events flow
-      record =
-        Jason.encode!(%{
-          "message" => %{
-            "role" => "assistant",
-            "content" => [
-              %{"type" => "tool_use", "id" => "t1", "name" => "Read", "input" => %{}}
-            ]
-          }
-        })
-
-      File.write!(new_jsonl, record <> "\n", [:append])
-
-      assert_receive {:parser_event, ^session_id, %{type: :tool_call, tool: "Read"}}, 3000
-
-      GenServer.stop(pid)
-    end
-
-    @tag :tmp_dir
     test "only reads content appended after watcher locks on", %{tmp_dir: tmp_dir} do
       session_id = "test-skip-old-#{System.unique_integer([:positive])}"
 
@@ -78,7 +30,7 @@ defmodule Sam.Session.TranscriptWatcherTest do
         GenServer.start_link(Sam.Session.TranscriptWatcher, %{
           session_id: session_id,
           workdir: nil,
-          _test_project_dir: project_dir
+          _test_jsonl_path: jsonl
         })
 
       # Should NOT emit events from pre-existing content
@@ -101,6 +53,49 @@ defmodule Sam.Session.TranscriptWatcherTest do
 
       GenServer.stop(pid)
     end
+  end
+
+  @tag :tmp_dir
+  test "transitions from waiting to watching on journal_found", %{tmp_dir: tmp_dir} do
+    session_id = "test-tw-jf-#{System.unique_integer([:positive])}"
+    jsonl_path = Path.join(tmp_dir, "session.jsonl")
+    File.write!(jsonl_path, "")
+
+    Phoenix.PubSub.subscribe(Sam.PubSub, "session:#{session_id}")
+
+    # Start watcher WITHOUT a test path (simulates waiting state)
+    {:ok, pid} =
+      GenServer.start_link(Sam.Session.TranscriptWatcher, %{
+        session_id: session_id,
+        workdir: nil,
+        _test_project_dir: Path.join(tmp_dir, "nonexistent")
+      })
+
+    # Verify it's in waiting state (no path found)
+    state = :sys.get_state(pid)
+    assert state.path == nil
+
+    # Send journal_found
+    send(pid, {:journal_found, jsonl_path})
+
+    # Give it time to process
+    Process.sleep(200)
+
+    # Now append data and verify events flow
+    record =
+      Jason.encode!(%{
+        "message" => %{
+          "role" => "assistant",
+          "content" => [
+            %{"type" => "tool_use", "id" => "t1", "name" => "Read", "input" => %{}}
+          ]
+        }
+      })
+
+    File.write!(jsonl_path, record <> "\n", [:append])
+    assert_receive {:parser_event, ^session_id, %{type: :tool_call, tool: "Read"}}, 3000
+
+    GenServer.stop(pid)
   end
 
   @tag :tmp_dir

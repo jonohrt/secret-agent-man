@@ -404,7 +404,7 @@ defmodule SamWeb.Features.StatusIndicatorTest do
     end
 
     test "terminate does not create ghost sessions", %{session: session} do
-      sid = start_mock_session()
+      _sid = start_mock_session()
 
       session =
         session

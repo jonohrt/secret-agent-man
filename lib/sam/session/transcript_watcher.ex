@@ -4,18 +4,19 @@ defmodule Sam.Session.TranscriptWatcher do
   Emits parser events (tool_call, tool_result, assistant_response) that drive
   the Server's status state machine.
 
-  Discovery: finds the JSONL file created closest to when this watcher started,
-  using file birthtime on macOS. Falls back to most recently modified on Linux.
+  The JSONL file path is provided externally via a {:journal_found, path} message
+  sent by JournalFinder (which watches the Claude projects directory for new files).
   """
   use GenServer
   require Logger
 
   @poll_interval_ms 1_000
-  @discovery_timeout_ms 30_000
   @claude_projects_dir Path.join(System.user_home!(), ".claude/projects")
 
   def start_link(opts) do
-    GenServer.start_link(__MODULE__, opts)
+    session_id = Map.fetch!(opts, :session_id)
+    name = {:via, Registry, {Sam.ProcessRegistry, {:transcript_watcher, session_id}}}
+    GenServer.start_link(__MODULE__, opts, name: name)
   end
 
   @impl true
@@ -23,18 +24,15 @@ defmodule Sam.Session.TranscriptWatcher do
     session_id = Map.fetch!(opts, :session_id)
     workdir = Map.get(opts, :workdir)
     test_path = Map.get(opts, :_test_jsonl_path)
-    test_project_dir = Map.get(opts, :_test_project_dir)
-
-    started_at = System.os_time(:second)
+    # _test_project_dir is accepted but ignored (discovery removed)
+    _test_project_dir = Map.get(opts, :_test_project_dir)
 
     state = %{
       session_id: session_id,
       workdir: workdir,
-      project_dir_override: test_project_dir,
       path: test_path,
       offset: if(test_path, do: file_size(test_path), else: 0),
-      line_buffer: "",
-      started_at: started_at
+      line_buffer: ""
     }
 
     send(self(), :poll)
@@ -43,17 +41,9 @@ defmodule Sam.Session.TranscriptWatcher do
 
   @impl true
   def handle_info(:poll, %{path: nil} = state) do
-    case find_session_jsonl(state) do
-      nil ->
-        schedule_poll()
-        {:noreply, state}
-
-      path ->
-        Logger.info("[TranscriptWatcher] Locked onto #{Path.basename(path)}")
-        offset = file_size(path)
-        schedule_poll()
-        {:noreply, %{state | path: path, offset: offset}}
-    end
+    # Waiting for JournalFinder to send {:journal_found, path}
+    schedule_poll()
+    {:noreply, state}
   end
 
   def handle_info(:poll, state) do
@@ -85,90 +75,13 @@ defmodule Sam.Session.TranscriptWatcher do
     end
   end
 
-  ## Discovery
-
-  defp find_session_jsonl(state) do
-    dir = state.project_dir_override || project_dir(state.workdir)
-    now = System.os_time(:second)
-    age = now - state.started_at
-
-    case File.ls(dir) do
-      {:ok, files} ->
-        jsonl_files =
-          files
-          |> Enum.filter(&String.ends_with?(&1, ".jsonl"))
-          |> Enum.map(&Path.join(dir, &1))
-
-        # Try birthtime-based matching first (macOS)
-        case find_by_birthtime(jsonl_files, state.started_at) do
-          nil when age > div(@discovery_timeout_ms, 1000) ->
-            # Fallback: pick most recently modified after timeout
-            Logger.warning("[TranscriptWatcher] Birthtime match failed, falling back to mtime")
-            find_by_mtime(jsonl_files)
-
-          nil ->
-            nil
-
-          path ->
-            path
-        end
-
-      _ ->
-        nil
-    end
+  def handle_info({:journal_found, path}, state) do
+    Logger.info("[TranscriptWatcher] Received journal path: #{Path.basename(path)}")
+    offset = file_size(path)
+    {:noreply, %{state | path: path, offset: offset}}
   end
 
-  # Find JSONL created within 10 seconds of watcher start (covers startup race)
-  defp find_by_birthtime(paths, started_at) do
-    cutoff = started_at - 10
-
-    paths
-    |> Enum.map(fn path -> {path, get_birthtime(path)} end)
-    |> Enum.filter(fn {_, bt} -> bt >= cutoff end)
-    |> Enum.sort_by(fn {_, bt} -> bt end, :desc)
-    |> case do
-      [{path, _} | _] -> path
-      [] -> nil
-    end
-  end
-
-  defp find_by_mtime(paths) do
-    paths
-    |> Enum.map(fn path ->
-      case File.stat(path, time: :posix) do
-        {:ok, %{mtime: mt}} -> {path, mt}
-        _ -> nil
-      end
-    end)
-    |> Enum.reject(&is_nil/1)
-    |> Enum.sort_by(fn {_, mt} -> mt end, :desc)
-    |> case do
-      [{path, _} | _] -> path
-      [] -> nil
-    end
-  end
-
-  defp get_birthtime(path) do
-    case :os.type() do
-      {:unix, :darwin} ->
-        case System.cmd("/usr/bin/stat", ["-f", "%B", path], stderr_to_stdout: true) do
-          {output, 0} ->
-            case Integer.parse(String.trim(output)) do
-              {ts, _} -> ts
-              :error -> 0
-            end
-
-          _ ->
-            0
-        end
-
-      _ ->
-        # Linux: no birthtime, return 0 so birthtime matching skips
-        0
-    end
-  end
-
-  ## Parsing
+  ## Helpers
 
   defp schedule_poll do
     Process.send_after(self(), :poll, @poll_interval_ms)
@@ -253,13 +166,13 @@ defmodule Sam.Session.TranscriptWatcher do
 
   defp handle_record(_, _), do: :ok
 
-  defp project_dir(nil) do
+  def project_dir(nil) do
     cwd = File.cwd!()
     encoded = String.replace(cwd, "/", "-")
     Path.join(@claude_projects_dir, encoded)
   end
 
-  defp project_dir(workdir) do
+  def project_dir(workdir) do
     encoded = String.replace(workdir, "/", "-")
     Path.join(@claude_projects_dir, encoded)
   end

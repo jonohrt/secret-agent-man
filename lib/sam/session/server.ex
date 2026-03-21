@@ -46,6 +46,7 @@ defmodule Sam.Session.Server do
 
   def list_sessions do
     Registry.select(Sam.ProcessRegistry, [{{:"$1", :_, :_}, [], [:"$1"]}])
+    |> Enum.filter(&is_binary/1)
   end
 
   defp via(session_id), do: {:via, Registry, {Sam.ProcessRegistry, session_id}}
