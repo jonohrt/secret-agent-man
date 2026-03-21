@@ -55,7 +55,7 @@ cd secret-agent-man
 mix phx.server
 ```
 
-Open [http://localhost:4000](http://localhost:4000) in your browser.
+Open [http://localhost:4040](http://localhost:4040) in your browser.
 
 > **Already have Elixir, Zig, and Node installed?** You can skip the bootstrap and run `mix setup` directly.
 
