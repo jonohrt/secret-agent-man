@@ -1,10 +1,11 @@
 defmodule Sam.Session.Summarizer do
   use GenServer
+  require Logger
 
   @default_debounce_ms 5_000
   @decision_point_types [:tool_call, :input_needed, :agent_spawn, :completion, :activity]
 
-  defstruct [:session_id, :debounce_ms, :timer_ref, buffer: []]
+  defstruct [:session_id, :debounce_ms, :timer_ref, :jsonl_path, :ollama_opts, buffer: []]
 
   def start_link(opts) do
     GenServer.start_link(__MODULE__, opts)
@@ -22,7 +23,8 @@ defmodule Sam.Session.Summarizer do
     {:ok,
      %__MODULE__{
        session_id: session_id,
-       debounce_ms: Map.get(opts, :debounce_ms, @default_debounce_ms)
+       debounce_ms: Map.get(opts, :debounce_ms, @default_debounce_ms),
+       ollama_opts: Map.get(opts, :ollama_opts, [])
      }}
   end
 
@@ -36,6 +38,13 @@ defmodule Sam.Session.Summarizer do
     state = do_summarize(state)
     {:noreply, %{state | timer_ref: nil}}
   end
+
+  def handle_info({:journal_found, path}, state) do
+    Logger.info("[Summarizer] Received journal path: #{Path.basename(path)}")
+    {:noreply, %{state | jsonl_path: path}}
+  end
+
+  def handle_info({:session_update, _, _}, state), do: {:noreply, state}
 
   # Ignore other PubSub messages
   def handle_info({:pty_output, _, _}, state), do: {:noreply, state}
@@ -60,36 +69,32 @@ defmodule Sam.Session.Summarizer do
     %{state | timer_ref: ref}
   end
 
+  defp do_summarize(%{jsonl_path: nil} = state) do
+    %{state | buffer: []}
+  end
+
   defp do_summarize(%{buffer: []} = state), do: state
 
   defp do_summarize(state) do
-    all_lines =
-      state.buffer
-      |> Enum.flat_map(fn
-        %{type: :activity, lines: lines} -> lines
-        %{type: :tool_call, tool: tool, file: file} -> ["Used #{tool} on #{file}"]
-        %{type: :input_needed} -> ["Waiting for user input"]
-        %{type: :agent_spawn} -> ["Spawned subagent"]
-        _ -> []
-      end)
-      |> Enum.map(&sanitize_text/1)
-      |> Enum.filter(fn line ->
-        # Drop lines that are just whitespace, single chars, or terminal noise
-        trimmed = String.trim(line)
+    turns = Sam.LLM.OllamaClient.extract_turns(state.jsonl_path)
 
-        String.length(trimmed) > 3 and
-          not String.match?(trimmed, ~r/^[\s│|─┌┐└┘├┤┬┴┼╭╮╰╯═║╔╗╚╝╠╣╦╩╬\-\+\*]+$/)
-      end)
-      |> Enum.uniq()
-
-    if all_lines == [] do
-      # Nothing meaningful to summarize
-      state
+    if turns == [] do
+      %{state | buffer: []}
     else
       summary =
-        case Sam.LLM.Client.summarize(all_lines) do
-          {:ok, text} -> text
-          {:error, _} -> Enum.join(all_lines, " | ")
+        case Sam.LLM.OllamaClient.summarize(turns, state.ollama_opts) do
+          {:ok, text} ->
+            text
+
+          {:error, _reason} ->
+            # Fallback: last assistant message text
+            turns
+            |> Enum.filter(&(&1.role == "assistant"))
+            |> List.last()
+            |> case do
+              %{content: text} -> String.slice(text, 0, 160)
+              nil -> "Agent is working..."
+            end
         end
 
       summary = sanitize_text(summary)
@@ -100,7 +105,6 @@ defmodule Sam.Session.Summarizer do
         {:summary, state.session_id,
          %{
            summary: summary,
-           raw_events: state.buffer,
            timestamp: DateTime.utc_now()
          }}
       )

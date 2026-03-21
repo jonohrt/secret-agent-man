@@ -1,59 +1,117 @@
 defmodule Sam.Session.SummarizerTest do
   use ExUnit.Case, async: false
 
-  describe "summarization" do
-    test "buffers events and produces summaries on decision points" do
-      Phoenix.PubSub.subscribe(Sam.PubSub, "session:test-sum-1")
+  describe "JSONL-based summarization" do
+    @tag :tmp_dir
+    test "summarizes from JSONL turns on decision point", %{tmp_dir: tmp_dir} do
+      session_id = "test-sum-jsonl-#{System.unique_integer([:positive])}"
+      jsonl_path = Path.join(tmp_dir, "session.jsonl")
+
+      records =
+        [
+          %{
+            "message" => %{
+              "role" => "assistant",
+              "content" => [
+                %{"type" => "text", "text" => "I'll fix the login bug by updating auth.ex"}
+              ]
+            }
+          },
+          %{
+            "message" => %{
+              "role" => "assistant",
+              "content" => [
+                %{"type" => "text", "text" => "Running tests to verify the fix"},
+                %{"type" => "tool_use", "name" => "Bash", "id" => "t1", "input" => %{}}
+              ]
+            }
+          }
+        ]
+        |> Enum.map(&Jason.encode!/1)
+
+      File.write!(jsonl_path, Enum.join(records, "\n") <> "\n")
+
+      Phoenix.PubSub.subscribe(Sam.PubSub, "session:#{session_id}")
 
       {:ok, pid} =
         Sam.Session.Summarizer.start_link(%{
-          session_id: "test-sum-1",
+          session_id: session_id,
           debounce_ms: 50
         })
 
-      # Push activity events
-      Sam.Session.Summarizer.push_event(pid, %{
-        type: :activity,
-        lines: ["Searching codebase for auth handler", "Found 3 files matching"],
-        timestamp: DateTime.utc_now()
-      })
+      send(pid, {:journal_found, jsonl_path})
 
-      # Push a decision point (triggers summary)
       Sam.Session.Summarizer.push_event(pid, %{
         type: :tool_call,
         tool: "Edit",
-        file: "src/auth.ts",
         timestamp: DateTime.utc_now()
       })
 
-      # Should receive a summary (using fallback since no API key)
-      assert_receive {:summary, "test-sum-1", %{summary: summary, raw_events: events}}, 2000
+      assert_receive {:summary, ^session_id, %{summary: summary}}, 5000
       assert is_binary(summary)
-      assert length(events) == 2
+      assert String.length(summary) > 0
     end
 
-    test "without API key, falls back to joining lines" do
-      Phoenix.PubSub.subscribe(Sam.PubSub, "session:test-sum-2")
+    @tag :tmp_dir
+    test "falls back to last assistant text when Ollama unavailable", %{tmp_dir: tmp_dir} do
+      session_id = "test-sum-fallback-#{System.unique_integer([:positive])}"
+      jsonl_path = Path.join(tmp_dir, "session.jsonl")
+
+      record =
+        Jason.encode!(%{
+          "message" => %{
+            "role" => "assistant",
+            "content" => [
+              %{
+                "type" => "text",
+                "text" => "I fixed the authentication bug in login.ex by adding a nil check"
+              }
+            ]
+          }
+        })
+
+      File.write!(jsonl_path, record <> "\n")
+
+      Phoenix.PubSub.subscribe(Sam.PubSub, "session:#{session_id}")
 
       {:ok, pid} =
         Sam.Session.Summarizer.start_link(%{
-          session_id: "test-sum-2",
+          session_id: session_id,
+          debounce_ms: 50,
+          ollama_opts: [base_url: "http://localhost:1"]
+        })
+
+      send(pid, {:journal_found, jsonl_path})
+
+      Sam.Session.Summarizer.push_event(pid, %{
+        type: :tool_call,
+        tool: "Read",
+        timestamp: DateTime.utc_now()
+      })
+
+      assert_receive {:summary, ^session_id, %{summary: summary}}, 5000
+      assert is_binary(summary)
+      assert String.length(summary) > 0
+    end
+
+    test "produces no summary when no JSONL path available" do
+      session_id = "test-sum-nopath-#{System.unique_integer([:positive])}"
+
+      Phoenix.PubSub.subscribe(Sam.PubSub, "session:#{session_id}")
+
+      {:ok, pid} =
+        Sam.Session.Summarizer.start_link(%{
+          session_id: session_id,
           debounce_ms: 50
         })
 
       Sam.Session.Summarizer.push_event(pid, %{
-        type: :activity,
-        lines: ["line one", "line two"],
+        type: :tool_call,
+        tool: "Read",
         timestamp: DateTime.utc_now()
       })
 
-      Sam.Session.Summarizer.push_event(pid, %{
-        type: :input_needed,
-        timestamp: DateTime.utc_now()
-      })
-
-      assert_receive {:summary, "test-sum-2", %{summary: summary}}, 2000
-      assert String.contains?(summary, "line one")
+      refute_receive {:summary, ^session_id, _}, 500
     end
   end
 end
