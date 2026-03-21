@@ -83,7 +83,9 @@ const TerminalHook = {
     this._resizeHandler = () => this.fitAddon.fit()
     window.addEventListener('resize', this._resizeHandler)
 
-    // Terminal is embedded in bento grid — no escape-to-close needed
+    // Focus terminal on click so Vimium enters Insert Mode
+    container.addEventListener('click', () => this.term.focus())
+    this.term.focus()
   },
 
   destroyed() {
