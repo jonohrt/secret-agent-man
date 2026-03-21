@@ -29,6 +29,22 @@ defmodule Sam.Persistence do
     :dets.close(state.table)
   end
 
+  def load_saved_sessions(table \\ :sam_persistence) do
+    :dets.foldl(
+      fn {_id, data}, acc -> [data | acc] end,
+      [],
+      table
+    )
+  rescue
+    ArgumentError -> []
+  end
+
+  def delete_session(table \\ :sam_persistence, session_id) do
+    :dets.delete(table, session_id)
+  rescue
+    ArgumentError -> :ok
+  end
+
   defp flush_sessions(table) do
     sessions = Sam.Session.Server.list_sessions()
 
@@ -41,6 +57,7 @@ defmodule Sam.Persistence do
           name: state.name,
           status: state.status,
           agent_type: state.agent_type,
+          workdir: state.workdir,
           activity: Enum.take(state.activity, 50)
         }
 
