@@ -24,7 +24,8 @@ if System.get_env("PHX_SERVER") do
 end
 
 if config_env() != :test do
-  config :sam, SamWeb.Endpoint, http: [port: String.to_integer(System.get_env("PORT", "4000"))]
+  default_port = if config_env() == :dev, do: "4040", else: "4000"
+  config :sam, SamWeb.Endpoint, http: [port: String.to_integer(System.get_env("PORT", default_port))]
 end
 
 if config_env() == :prod do
