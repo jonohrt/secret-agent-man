@@ -160,6 +160,20 @@ defmodule Sam.Session.ServerTest do
     end
   end
 
+  describe "branch detection" do
+    test "server populates branch from git on init" do
+      session_id = "test-branch-#{System.unique_integer([:positive])}"
+      workdir = File.cwd!()
+      opts = %{session_id: session_id, workdir: workdir}
+      _pid = start_supervised!({Sam.Session.Server, opts})
+
+      state = Sam.Session.Server.get_state(session_id)
+      assert is_binary(state.branch)
+      assert state.branch != ""
+      assert state.branch != nil
+    end
+  end
+
   describe "agent title fallback" do
     test "agent entry gets fallback description when hook sends empty string" do
       session_id = "test-agent-title-#{System.unique_integer([:positive])}"

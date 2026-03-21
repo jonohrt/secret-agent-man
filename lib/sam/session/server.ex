@@ -58,11 +58,14 @@ defmodule Sam.Session.Server do
     session_id = Map.fetch!(opts, :session_id)
     Phoenix.PubSub.subscribe(Sam.PubSub, "session:#{session_id}")
 
+    workdir = Map.get(opts, :workdir)
+
     state = %__MODULE__{
       session_id: session_id,
       name: Map.get(opts, :name, session_id),
       agent_type: Map.get(opts, :agent_type, :generic),
-      workdir: Map.get(opts, :workdir),
+      workdir: workdir,
+      branch: detect_branch(workdir),
       idle_timeout_ms: Map.get(opts, :idle_timeout_ms, @idle_timeout_ms),
       status: :idle
     }
@@ -326,6 +329,20 @@ defmodule Sam.Session.Server do
 
     %{state | idle_timer: nil, activity: clean_activity}
   end
+
+  defp detect_branch(workdir) when is_binary(workdir) do
+    case System.cmd("git", ["rev-parse", "--abbrev-ref", "HEAD"],
+           cd: workdir,
+           stderr_to_stdout: true
+         ) do
+      {branch, 0} -> String.trim(branch)
+      _ -> nil
+    end
+  rescue
+    _ -> nil
+  end
+
+  defp detect_branch(_), do: nil
 
   defp broadcast_ui_update(state) do
     clean_state = sanitize_state(state)
