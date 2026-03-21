@@ -28,12 +28,13 @@ import {hooks as colocatedHooks} from "phoenix-colocated/sam"
 import topbar from "../vendor/topbar"
 import TerminalHook from "./terminal"
 import NotificationsHook from "./notifications"
+import AuxTerminalHook from "./aux_terminal"
 
 const csrfToken = document.querySelector("meta[name='csrf-token']").getAttribute("content")
 const liveSocket = new LiveSocket("/live", Socket, {
   longPollFallbackMs: 2500,
   params: {_csrf_token: csrfToken},
-  hooks: {...colocatedHooks, Terminal: TerminalHook, Notifications: NotificationsHook},
+  hooks: {...colocatedHooks, Terminal: TerminalHook, Notifications: NotificationsHook, AuxTerminal: AuxTerminalHook},
 })
 
 // Show progress bar on live navigation and form submits
