@@ -510,6 +510,62 @@ body::before {
   border-bottom-color: var(--primary);
 }
 
+/* Session overview cards */
+.session-card {
+  padding: 8px 12px;
+  border-bottom: 1px solid rgba(67, 71, 77, 0.12);
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.session-card:hover {
+  background: var(--surface-container);
+}
+
+.session-card.selected {
+  background: var(--surface-container);
+  border-left: 3px solid var(--primary);
+  padding-left: 9px;
+}
+
+.session-card-top {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.session-card-name {
+  font-family: var(--font-headline);
+  font-size: 0.875rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--on-surface);
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.session-card-time {
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  color: var(--outline);
+  flex-shrink: 0;
+}
+
+.session-card-summary {
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  color: var(--outline);
+  padding-left: 11px;
+  margin-top: 2px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 /* ============================================
    TERMINAL PANEL
    ============================================ */

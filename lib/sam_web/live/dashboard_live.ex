@@ -374,6 +374,10 @@ defmodule SamWeb.DashboardLive do
 
   defp agent_activity_text(_), do: "Awaiting directives"
 
+  defp raw_summary_text(%{activity: [latest | _]}), do: latest.text
+  defp raw_summary_text(%{summary: summary}) when is_binary(summary) and summary != "", do: summary
+  defp raw_summary_text(_), do: "Awaiting directives"
+
   defp activity_msg_class(%{type: :summary}), do: "summary"
   defp activity_msg_class(%{type: :system}), do: "system"
   defp activity_msg_class(%{type: :agent_event}), do: "agent-event"
@@ -646,33 +650,52 @@ defmodule SamWeb.DashboardLive do
             <span style="opacity: 0.5;">LIVE</span>
           </div>
           <div class="sam-panel-body">
-            <%= unless @summarizer_mode do %>
-              <div class="ollama-nudge">
-                Install
-                <a
-                  href="https://ollama.com"
-                  target="_blank"
-                  style="color: var(--phosphor-green); text-decoration: underline;"
-                >
-                  Ollama
-                </a>
-                for AI-powered summaries
-              </div>
-            <% end %>
-            <%= if @selected_session do %>
-              <% state = selected_state(@sessions, @selected_session) %>
-              <%= if state do %>
-                <div
-                  :for={item <- Enum.take(Map.get(state, :activity, []), 50)}
-                  class="activity-item"
-                >
-                  <span class="time">{format_time(item.timestamp)}</span>
-                  <%= if Map.get(item, :tool_count, 0) > 0 do %>
-                    <span class="tool-count">{item.tool_count}</span>
-                  <% end %>
-                  <span class={"msg #{activity_msg_class(item)}"}>{sanitize_text(item.text)}</span>
+            <%= if @panel_view == :activity do %>
+              <%= unless @summarizer_mode do %>
+                <div class="ollama-nudge">
+                  Install
+                  <a
+                    href="https://ollama.com"
+                    target="_blank"
+                    style="color: var(--phosphor-green); text-decoration: underline;"
+                  >
+                    Ollama
+                  </a>
+                  for AI-powered summaries
                 </div>
               <% end %>
+              <%= if @selected_session do %>
+                <% state = selected_state(@sessions, @selected_session) %>
+                <%= if state do %>
+                  <div
+                    :for={item <- Enum.take(Map.get(state, :activity, []), 50)}
+                    class="activity-item"
+                  >
+                    <span class="time">{format_time(item.timestamp)}</span>
+                    <%= if Map.get(item, :tool_count, 0) > 0 do %>
+                      <span class="tool-count">{item.tool_count}</span>
+                    <% end %>
+                    <span class={"msg #{activity_msg_class(item)}"} title={item.text}>{sanitize_text(item.text)}</span>
+                  </div>
+                <% end %>
+              <% end %>
+            <% else %>
+              <div
+                :for={{id, state} <- Enum.sort_by(@sessions, fn {id, _} -> id end)}
+                :if={!state[:ghost]}
+                class={"session-card #{if id == @selected_session, do: "selected"}"}
+                phx-click="select_session"
+                phx-value-id={id}
+              >
+                <div class="session-card-top">
+                  <span class={"status-dot #{status_class(state.status)}"}></span>
+                  <span class="session-card-name">{state.name || id}</span>
+                  <span class="session-card-time">{format_uptime(state)}</span>
+                </div>
+                <div class="session-card-summary" title={raw_summary_text(state)}>
+                  {agent_activity_text(state)}
+                </div>
+              </div>
             <% end %>
           </div>
         </div>
