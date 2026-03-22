@@ -221,10 +221,21 @@ const TerminalHook = {
     })
     container.addEventListener('drop', (e) => {
       e.preventDefault()
-      const files = e.dataTransfer.files
-      if (files.length > 0 && this.channel) {
-        const paths = Array.from(files).map(f => f.path || f.name)
-        const text = paths.join(' ')
+      // Try file:// URIs first (Finder on macOS provides these)
+      const uriList = e.dataTransfer.getData('text/uri-list')
+      if (uriList && this.channel) {
+        const paths = uriList.split('\n')
+          .filter(u => u.startsWith('file://'))
+          .map(u => decodeURIComponent(new URL(u).pathname))
+          .map(p => p.includes(' ') ? `'${p}'` : p)
+        if (paths.length > 0) {
+          this.channel.push('input', { data: paths.join(' ') })
+          return
+        }
+      }
+      // Fallback: plain text (e.g. paths dragged from other apps)
+      const text = e.dataTransfer.getData('text/plain')
+      if (text && this.channel) {
         this.channel.push('input', { data: text })
       }
     })
