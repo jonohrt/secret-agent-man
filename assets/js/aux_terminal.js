@@ -88,6 +88,21 @@ const AuxTerminalHook = {
     // Fit on window resize
     this._resizeHandler = () => this.fitAddon.fit()
     window.addEventListener('resize', this._resizeHandler)
+
+    // Drag and drop files → paste file path into terminal
+    this.el.addEventListener('dragover', (e) => {
+      e.preventDefault()
+      e.dataTransfer.dropEffect = 'copy'
+    })
+    this.el.addEventListener('drop', (e) => {
+      e.preventDefault()
+      const files = e.dataTransfer.files
+      if (files.length > 0 && this.channel) {
+        const paths = Array.from(files).map(f => f.path || f.name)
+        const text = paths.join(' ')
+        this.channel.push('input', { data: text })
+      }
+    })
   },
 
   destroyed() {
