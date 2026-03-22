@@ -1121,7 +1121,21 @@ body::before {
 
 .terminal-modal-body {
   flex: 1;
+  min-height: 0;
   background: #020f1e;
+  position: relative;
+}
+
+.terminal-modal-body .xterm {
+  height: 100%;
+}
+
+.terminal-modal-body .xterm-viewport {
+  height: 100% !important;
+}
+
+.terminal-modal-body .xterm-screen {
+  height: 100%;
 }
 
 /* Ghost tabs */

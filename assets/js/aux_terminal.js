@@ -40,7 +40,16 @@ const AuxTerminalHook = {
       console.warn('WebGL addon not available, using canvas renderer')
     }
 
-    this.fitAddon.fit()
+    // Fit after a frame so the container has dimensions
+    requestAnimationFrame(() => {
+      this.fitAddon.fit()
+    })
+
+    // Re-fit when the container becomes visible or resizes
+    this._resizeObserver = new ResizeObserver(() => {
+      this.fitAddon.fit()
+    })
+    this._resizeObserver.observe(this.el)
 
     // Connect to Phoenix channel
     const socket = new Socket('/socket', { params: {} })
@@ -82,6 +91,7 @@ const AuxTerminalHook = {
   },
 
   destroyed() {
+    if (this._resizeObserver) this._resizeObserver.disconnect()
     if (this.channel) this.channel.leave()
     if (this.term) this.term.dispose()
     if (this._resizeHandler) window.removeEventListener('resize', this._resizeHandler)

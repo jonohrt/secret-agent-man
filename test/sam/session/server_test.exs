@@ -432,17 +432,31 @@ defmodule Sam.Session.ServerTest do
       refute_receive {:session_update, ^id, %{status: :needs_input}}, 400
     end
 
-    test "pty_output with prompt character ❯ transitions working to idle instantly", %{
+    test "pty_output with prompt at line boundary transitions to idle when no JSONL turn active",
+         %{
+           session_id: id,
+           pid: pid
+         } do
+      # Set working WITHOUT jsonl_turn_active (simulates non-Claude session)
+      :sys.replace_state(pid, fn state ->
+        %{state | status: :working, jsonl_turn_active: false}
+      end)
+
+      # PTY output with prompt at line boundary should go idle
+      send(pid, {:pty_output, id, "some output\r\n\e[1m❯\e[0m "})
+      assert_receive {:session_update, ^id, %{status: :idle}}, 500
+    end
+
+    test "pty_output with ❯ embedded in content does NOT change status", %{
       session_id: id,
       pid: pid
     } do
-      # Start working via assistant_response (text-only, would normally wait 5s)
       send(pid, {:parser_event, id, %{type: :assistant_response, timestamp: DateTime.utc_now()}})
       assert_receive {:session_update, ^id, %{status: :working}}, 1000
 
-      # PTY output containing the prompt character should instantly go idle
-      send(pid, {:pty_output, id, "\e[1m❯\e[0m "})
-      assert_receive {:session_update, ^id, %{status: :idle}}, 500
+      # ❯ embedded in tool output (not at line boundary) should NOT trigger idle
+      send(pid, {:pty_output, id, "The arrow ❯ points right"})
+      refute_receive {:session_update, ^id, %{status: :idle}}, 300
     end
 
     test "pty_output without prompt character does NOT change status", %{
@@ -465,12 +479,12 @@ defmodule Sam.Session.ServerTest do
       state = :sys.get_state(pid)
       assert state.status == :idle
 
-      # Prompt character while idle should NOT trigger a broadcast
-      send(pid, {:pty_output, id, "❯ "})
+      # Prompt at line boundary while idle should NOT trigger a broadcast
+      send(pid, {:pty_output, id, "\r\n❯ "})
       refute_receive {:session_update, ^id, _}, 300
     end
 
-    test "stale JSONL events after prompt detection are suppressed", %{
+    test "JSONL events after turn_end start a new turn", %{
       session_id: id,
       pid: pid
     } do
@@ -478,24 +492,109 @@ defmodule Sam.Session.ServerTest do
       send(pid, {:parser_event, id, %{type: :assistant_response, timestamp: DateTime.utc_now()}})
       assert_receive {:session_update, ^id, %{status: :working}}, 1000
 
-      # Prompt detected → idle
-      send(pid, {:pty_output, id, "❯ "})
+      # Turn ends → idle, clears jsonl_turn_active
+      send(pid, {:parser_event, id, %{type: :turn_end, timestamp: DateTime.utc_now()}})
       assert_receive {:session_update, ^id, %{status: :idle}}, 500
 
-      # Stale JSONL events arriving after prompt should NOT flip back to working
-      send(pid, {:parser_event, id, %{type: :assistant_response, timestamp: DateTime.utc_now()}})
-      refute_receive {:session_update, ^id, %{status: :working}}, 300
+      # New JSONL events should start a new turn normally
+      send(pid, {:parser_event, id, %{type: :user_prompt, timestamp: DateTime.utc_now()}})
+      assert_receive {:session_update, ^id, %{status: :working}}, 1000
+    end
+  end
 
+  describe "PTY prompt vs JSONL race condition" do
+    setup do
+      session_id = "test-race-#{System.unique_integer([:positive])}"
+      Phoenix.PubSub.subscribe(Sam.PubSub, "sessions:ui")
+
+      {:ok, pid} =
+        GenServer.start_link(Sam.Session.Server, %{
+          session_id: session_id,
+          name: "Race Test",
+          idle_timeout_ms: 5_000,
+          needs_input_timeout_ms: 5_000
+        })
+
+      assert_receive {:session_update, ^session_id, %{status: :idle}}, 1000
+      %{session_id: session_id, pid: pid}
+    end
+
+    test "PTY prompt ignored during active JSONL turn", %{
+      session_id: id,
+      pid: pid
+    } do
+      # 1. JSONL: tool_call → working (sets jsonl_turn_active)
       send(
         pid,
         {:parser_event, id, %{type: :tool_call, tool: "Read", timestamp: DateTime.utc_now()}}
       )
 
-      refute_receive {:session_update, ^id, %{status: :working}}, 300
-
-      # But user_prompt (new interaction) should clear suppression and go working
-      send(pid, {:parser_event, id, %{type: :user_prompt, timestamp: DateTime.utc_now()}})
       assert_receive {:session_update, ^id, %{status: :working}}, 1000
+
+      # 2. JSONL: tool_result → still working (idle timer started)
+      send(
+        pid,
+        {:parser_event, id, %{type: :tool_result, tool: "Read", timestamp: DateTime.utc_now()}}
+      )
+
+      # 3. PTY: prompt rendered between tool calls — should be ignored
+      send(pid, {:pty_output, id, "\r\n\e[1m❯\e[0m "})
+
+      # Should NOT go idle — JSONL turn is active
+      refute_receive {:session_update, ^id, %{status: :idle}}, 300
+
+      # 4. JSONL: next tool_call processes normally
+      send(
+        pid,
+        {:parser_event, id, %{type: :tool_call, tool: "Grep", timestamp: DateTime.utc_now()}}
+      )
+
+      state = :sys.get_state(pid)
+      assert state.status == :working
+    end
+
+    test "PTY prompt works when no JSONL turn is active", %{
+      session_id: id,
+      pid: pid
+    } do
+      # Start working via assistant_response (sets jsonl_turn_active)
+      send(pid, {:parser_event, id, %{type: :assistant_response, timestamp: DateTime.utc_now()}})
+      assert_receive {:session_update, ^id, %{status: :working}}, 1000
+
+      # End the turn (clears jsonl_turn_active)
+      send(pid, {:parser_event, id, %{type: :turn_end, timestamp: DateTime.utc_now()}})
+      assert_receive {:session_update, ^id, %{status: :idle}}, 500
+
+      # Start working again without JSONL (simulates non-Claude session)
+      # Use :sys.replace_state to set working without setting jsonl_turn_active
+      :sys.replace_state(pid, fn state -> %{state | status: :working} end)
+
+      # PTY prompt should work since jsonl_turn_active is false
+      send(pid, {:pty_output, id, "\r\n❯ "})
+      assert_receive {:session_update, ^id, %{status: :idle}}, 500
+    end
+
+    test "turn_end clears jsonl_turn_active so PTY prompt works after", %{
+      session_id: id,
+      pid: pid
+    } do
+      # JSONL turn: tool_call → turn_end
+      send(
+        pid,
+        {:parser_event, id, %{type: :tool_call, tool: "Read", timestamp: DateTime.utc_now()}}
+      )
+
+      assert_receive {:session_update, ^id, %{status: :working}}, 1000
+
+      send(pid, {:parser_event, id, %{type: :turn_end, timestamp: DateTime.utc_now()}})
+      assert_receive {:session_update, ^id, %{status: :idle}}, 500
+
+      # New working state without JSONL
+      :sys.replace_state(pid, fn state -> %{state | status: :working} end)
+
+      # PTY prompt should now work (turn is over)
+      send(pid, {:pty_output, id, "\r\n❯ "})
+      assert_receive {:session_update, ^id, %{status: :idle}}, 500
     end
   end
 

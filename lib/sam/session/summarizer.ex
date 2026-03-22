@@ -3,7 +3,16 @@ defmodule Sam.Session.Summarizer do
   require Logger
 
   @default_debounce_ms 5_000
-  @decision_point_types [:tool_call, :tool_result, :input_needed, :agent_spawn, :completion, :activity, :turn_end, :assistant_response]
+  @decision_point_types [
+    :tool_call,
+    :tool_result,
+    :input_needed,
+    :agent_spawn,
+    :completion,
+    :activity,
+    :turn_end,
+    :assistant_response
+  ]
   @health_check_interval_ms 60_000
 
   defstruct [:session_id, :debounce_ms, :timer_ref, :ollama_model, :ollama_opts, buffer: []]

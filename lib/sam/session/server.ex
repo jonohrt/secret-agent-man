@@ -1,14 +1,10 @@
 defmodule Sam.Session.Server do
   use GenServer
-  require Logger
 
   @idle_timeout_ms 10_000
   @needs_input_timeout_ms 7_000
   @text_idle_delay_ms 5_000
   @permission_exempt_tools ~w(Agent Task AskUserQuestion)
-
-  # How long after prompt detection to suppress stale JSONL events
-  @prompt_suppression_ms 3_000
 
   defstruct [
     :session_id,
@@ -21,8 +17,8 @@ defmodule Sam.Session.Server do
     :needs_input_timer,
     :needs_input_timeout_ms,
     :started_at,
-    :prompt_detected_at,
     status: :idle,
+    jsonl_turn_active: false,
     activity: [],
     agents: [],
     summary: "Awaiting directives..."
@@ -146,7 +142,7 @@ defmodule Sam.Session.Server do
     end
   end
 
-  # User submitted a new prompt → working (clears prompt suppression)
+  # User submitted a new prompt → working, starts a new JSONL turn
   @impl true
   def handle_info({:parser_event, _, %{type: :user_prompt}}, state) do
     if state.status in [:done, :error] do
@@ -154,7 +150,7 @@ defmodule Sam.Session.Server do
     else
       state = cancel_idle_timer(state)
       state = cancel_needs_input_timer(state)
-      state = %{state | status: :working, prompt_detected_at: nil}
+      state = %{state | status: :working, jsonl_turn_active: true}
       broadcast_ui_update(state)
       {:noreply, state}
     end
@@ -164,12 +160,12 @@ defmodule Sam.Session.Server do
   # turn_duration may never arrive for simple text responses
   @impl true
   def handle_info({:parser_event, _, %{type: :assistant_response}}, state) do
-    if state.status in [:done, :error] or prompt_suppressed?(state) do
+    if state.status in [:done, :error] do
       {:noreply, state}
     else
       state = cancel_idle_timer(state)
       state = cancel_needs_input_timer(state)
-      state = %{state | status: :working}
+      state = %{state | status: :working, jsonl_turn_active: true}
       broadcast_ui_update(state)
       # Fallback: if no turn_duration arrives within 5s, assume turn ended
       timer = Process.send_after(self(), :idle_timeout, @text_idle_delay_ms)
@@ -199,7 +195,7 @@ defmodule Sam.Session.Server do
 
   @impl true
   def handle_info({:parser_event, _, %{type: :tool_call} = event}, state) do
-    if state.status in [:done, :error] or prompt_suppressed?(state) do
+    if state.status in [:done, :error] do
       {:noreply, state}
     else
       # Tool starting — set working, NO idle timer (tool is still running)
@@ -231,7 +227,7 @@ defmodule Sam.Session.Server do
           state
         end
 
-      state = %{state | status: :working}
+      state = %{state | status: :working, jsonl_turn_active: true}
       broadcast_ui_update(state)
 
       # Start needs_input timer for non-exempt tools (permission prompts)
@@ -248,7 +244,7 @@ defmodule Sam.Session.Server do
 
   @impl true
   def handle_info({:parser_event, _, %{type: :tool_result} = event}, state) do
-    if state.status in [:done, :error] or prompt_suppressed?(state) do
+    if state.status in [:done, :error] do
       {:noreply, state}
     else
       state = cancel_needs_input_timer(state)
@@ -288,7 +284,7 @@ defmodule Sam.Session.Server do
     else
       state = cancel_idle_timer(state)
       state = cancel_needs_input_timer(state)
-      state = %{state | status: :idle}
+      state = %{state | status: :idle, jsonl_turn_active: false}
       broadcast_ui_update(state)
       {:noreply, state}
     end
@@ -312,16 +308,22 @@ defmodule Sam.Session.Server do
     {:noreply, state}
   end
 
-  # Detect Claude Code's prompt character ❯ (U+276F) for instant idle
-  @prompt_bytes <<0xE2, 0x9D, 0xAF>>
+  # Detect Claude Code's actual input prompt: ❯ (U+276F) preceded by a
+  # newline or carriage return (with optional ANSI escapes) and followed by
+  # a space. This avoids false positives from ❯ appearing in tool output,
+  # file contents, or Claude Code's own rendering chrome.
+  #
+  # We use a regex with the /u flag for UTF-8 safety.
+  @prompt_pattern ~r/[\r\n](?:\e\[[0-9;]*m)*❯(?:\e\[[0-9;]*m)* $/u
 
   @impl true
   def handle_info({:pty_output, _, data}, state) do
     if state.status in [:working, :needs_input] and
-         :binary.match(data, @prompt_bytes) != :nomatch do
+         not state.jsonl_turn_active and
+         Regex.match?(@prompt_pattern, data) do
       state = cancel_idle_timer(state)
       state = cancel_needs_input_timer(state)
-      state = %{state | status: :idle, prompt_detected_at: System.monotonic_time(:millisecond)}
+      state = %{state | status: :idle}
       broadcast_ui_update(state)
       {:noreply, state}
     else
@@ -347,7 +349,7 @@ defmodule Sam.Session.Server do
       has_working_agents = Enum.any?(state.agents, &(&1.status == :working))
 
       new_status = if has_working_agents, do: :background, else: :idle
-      state = %{state | status: new_status, idle_timer: nil}
+      state = %{state | status: new_status, idle_timer: nil, jsonl_turn_active: false}
       broadcast_ui_update(state)
       {:noreply, state}
     else
@@ -376,14 +378,6 @@ defmodule Sam.Session.Server do
   def handle_info({:journal_found, _path}, state), do: {:noreply, state}
 
   ## Private helpers
-
-  # Returns true if a stale JSONL event should be suppressed because
-  # we recently detected the prompt character in PTY output.
-  defp prompt_suppressed?(%{prompt_detected_at: nil}), do: false
-
-  defp prompt_suppressed?(%{prompt_detected_at: ts}) do
-    System.monotonic_time(:millisecond) - ts < @prompt_suppression_ms
-  end
 
   defp mark_first_working_agent_done(state) do
     {updated, _found} =

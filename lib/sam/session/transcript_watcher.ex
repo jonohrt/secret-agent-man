@@ -109,16 +109,33 @@ defmodule Sam.Session.TranscriptWatcher do
 
   ## Helpers
 
-  defp extract_tool_description("Bash", %{"description" => d}) when is_binary(d) and d != "", do: d
-  defp extract_tool_description("Bash", %{"command" => c}) when is_binary(c), do: String.slice(c, 0, 80)
-  defp extract_tool_description("Read", %{"file_path" => f}) when is_binary(f), do: Path.basename(f)
-  defp extract_tool_description("Edit", %{"file_path" => f}) when is_binary(f), do: Path.basename(f)
-  defp extract_tool_description("Write", %{"file_path" => f}) when is_binary(f), do: Path.basename(f)
+  defp extract_tool_description("Bash", %{"description" => d}) when is_binary(d) and d != "",
+    do: d
+
+  defp extract_tool_description("Bash", %{"command" => c}) when is_binary(c),
+    do: String.slice(c, 0, 80)
+
+  defp extract_tool_description("Read", %{"file_path" => f}) when is_binary(f),
+    do: Path.basename(f)
+
+  defp extract_tool_description("Edit", %{"file_path" => f}) when is_binary(f),
+    do: Path.basename(f)
+
+  defp extract_tool_description("Write", %{"file_path" => f}) when is_binary(f),
+    do: Path.basename(f)
+
   defp extract_tool_description("Glob", %{"pattern" => p}) when is_binary(p), do: p
   defp extract_tool_description("Grep", %{"pattern" => p}) when is_binary(p), do: p
-  defp extract_tool_description("Agent", %{"description" => d}) when is_binary(d) and d != "", do: d
-  defp extract_tool_description("Agent", %{"prompt" => p}) when is_binary(p), do: String.slice(p, 0, 80)
-  defp extract_tool_description("WebFetch", %{"url" => u}) when is_binary(u), do: String.slice(u, 0, 80)
+
+  defp extract_tool_description("Agent", %{"description" => d}) when is_binary(d) and d != "",
+    do: d
+
+  defp extract_tool_description("Agent", %{"prompt" => p}) when is_binary(p),
+    do: String.slice(p, 0, 80)
+
+  defp extract_tool_description("WebFetch", %{"url" => u}) when is_binary(u),
+    do: String.slice(u, 0, 80)
+
   defp extract_tool_description("WebSearch", %{"query" => q}) when is_binary(q), do: q
   defp extract_tool_description(_, %{"description" => d}) when is_binary(d) and d != "", do: d
   defp extract_tool_description(_, _), do: nil

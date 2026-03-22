@@ -25,6 +25,22 @@ const NotificationsHook = {
       btn.style.opacity = self.soundEnabled ? "1" : "0.4"
     }
 
+    // Cmd+1..9 tab switching
+    this._tabSwitchHandler = (e) => {
+      if (!e.metaKey || e.ctrlKey || e.altKey || e.shiftKey) return
+      const num = parseInt(e.key, 10)
+      if (isNaN(num) || num < 1 || num > 9) return
+
+      e.preventDefault()
+      const tabs = document.querySelectorAll(".sam-tab[phx-value-id]")
+      if (tabs.length === 0) return
+
+      const idx = num === 9 ? tabs.length - 1 : num - 1
+      const tab = tabs[idx]
+      if (tab) tab.click()
+    }
+    window.addEventListener("keydown", this._tabSwitchHandler)
+
     // Handle notify push events from LiveView
     this.handleEvent("notify", ({ status, session_name, session_id }) => {
       const messages = {
@@ -96,6 +112,12 @@ const NotificationsHook = {
       osc.stop(ctx.currentTime + 0.2)
     } catch (_) {
       // Autoplay policy may block — silently fail
+    }
+  },
+
+  destroyed() {
+    if (this._tabSwitchHandler) {
+      window.removeEventListener("keydown", this._tabSwitchHandler)
     }
   },
 
