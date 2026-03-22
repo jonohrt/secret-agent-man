@@ -48,6 +48,89 @@ defmodule SamWeb.DashboardLiveTest do
     assert render(view) =~ "New Operation" || render(view) =~ "DEPLOY"
   end
 
+  describe "tab rename" do
+    setup %{conn: conn} do
+      session_id = "test-rename-tab-#{System.unique_integer([:positive])}"
+
+      {:ok, pid} =
+        Sam.Session.Server.start_link(%{session_id: session_id, name: "Original Name"})
+
+      on_exit(fn ->
+        if Process.alive?(pid), do: GenServer.stop(pid)
+      end)
+
+      {:ok, view, _html} = live(conn, "/")
+
+      # Select our session tab
+      view |> element(".sam-tab", "Original Name") |> render_click()
+
+      %{view: view, session_id: session_id}
+    end
+
+    test "double-click tab shows rename input", %{view: view, session_id: session_id} do
+      html = view |> render_click("start_rename", %{"id" => session_id})
+
+      assert html =~ "rename-input"
+    end
+
+    test "submitting rename updates tab name", %{view: view, session_id: session_id} do
+      # Start rename
+      view |> render_click("start_rename", %{"id" => session_id})
+
+      # Submit new name
+      html =
+        view
+        |> element("form[phx-submit=rename_session]")
+        |> render_submit(%{"session_id" => session_id, "name" => "Renamed!"})
+
+      assert html =~ "Renamed!"
+      refute html =~ "rename-input"
+    end
+
+    test "cancel_rename clears editing state", %{view: view, session_id: session_id} do
+      view |> render_click("start_rename", %{"id" => session_id})
+
+      html = view |> render_click("cancel_rename", %{})
+
+      refute html =~ "rename-input"
+      assert html =~ "Original Name"
+    end
+
+    test "empty name is rejected", %{view: view, session_id: session_id} do
+      view |> render_click("start_rename", %{"id" => session_id})
+
+      html =
+        view
+        |> element("form[phx-submit=rename_session]")
+        |> render_submit(%{"session_id" => session_id, "name" => ""})
+
+      # Should still show original name, not empty
+      assert html =~ "Original Name"
+    end
+
+    test "rename preserves session selection and terminal", %{
+      view: view,
+      session_id: session_id
+    } do
+      # Start rename
+      view |> render_click("start_rename", %{"id" => session_id})
+
+      # Submit new name
+      view
+      |> element("form[phx-submit=rename_session]")
+      |> render_submit(%{"session_id" => session_id, "name" => "New Name"})
+
+      html = render(view)
+
+      # After rename, the view should still be alive (not redirected/reloaded)
+      assert html =~ "New Name"
+      # Selected session should still be our session
+      assert html =~ "TERMINATE"
+      # Session ID list should be unchanged — no new session created
+      refute html =~ "rename-input"
+    end
+  end
+
   test "elapsed time renders and ticks", %{conn: conn} do
     # Start a session BEFORE mounting the LiveView so it appears on load
     session_id = "test-uptime-e2e-#{System.unique_integer([:positive])}"

@@ -56,7 +56,8 @@ defmodule Sam.Session.PTY do
         workdir: workdir,
         env: %{
           "SAM_SESSION_ID" => session_id,
-          "SAM_PORT" => to_string(port_number)
+          "SAM_PORT" => to_string(port_number),
+          "CLAUDECODE" => ""
         }
       })
 

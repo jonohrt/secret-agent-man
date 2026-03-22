@@ -61,7 +61,8 @@ defmodule SamWeb.DashboardLive do
         show_settings: false,
         summarizer_mode: detect_summarizer_mode(),
         current_uptime: "00:00:00",
-        panel_view: :activity
+        panel_view: :activity,
+        editing_tab: nil
       )
 
     socket =
@@ -192,6 +193,31 @@ defmodule SamWeb.DashboardLive do
     {:noreply, assign(socket, panel_view: panel_view)}
   end
 
+  def handle_event("start_rename", %{"id" => id}, socket) do
+    {:noreply, assign(socket, editing_tab: id)}
+  end
+
+  def handle_event("rename_session", %{"session_id" => id, "name" => name}, socket) do
+    trimmed = String.trim(name)
+
+    if trimmed == "" do
+      {:noreply, assign(socket, editing_tab: nil)}
+    else
+      Sam.Session.Server.rename(id, trimmed)
+
+      sessions =
+        Map.update(socket.assigns.sessions, id, nil, fn s ->
+          if s, do: %{s | name: trimmed}, else: s
+        end)
+
+      {:noreply, assign(socket, editing_tab: nil, sessions: sessions)}
+    end
+  end
+
+  def handle_event("cancel_rename", _params, socket) do
+    {:noreply, assign(socket, editing_tab: nil)}
+  end
+
   def handle_event("save_settings", %{"default_workdir" => path}, socket) do
     expanded =
       if String.starts_with?(path, "~"),
@@ -264,7 +290,8 @@ defmodule SamWeb.DashboardLive do
       workdir: new_state.workdir,
       activity: new_state.activity,
       agents: new_state.agents,
-      started_at: new_state.started_at
+      started_at: new_state.started_at,
+      summary: new_state.summary
     }
 
     # Check for notification-worthy transition
@@ -320,7 +347,8 @@ defmodule SamWeb.DashboardLive do
           workdir: state.workdir,
           activity: state.activity,
           agents: state.agents,
-          started_at: state.started_at
+          started_at: state.started_at,
+          summary: state.summary
         }
 
         Map.put(acc, id, session_map)
@@ -370,33 +398,24 @@ defmodule SamWeb.DashboardLive do
 
   defp format_uptime(_), do: "00:00:00"
 
-  defp agent_activity_text(%{activity: [latest | _]}), do: sanitize_text(latest.text)
+  defp agent_activity_text(%{summary: summary})
+       when is_binary(summary) and summary != "" and summary != "Awaiting directives...",
+       do: sanitize_text(summary)
 
-  defp agent_activity_text(%{summary: summary}) when is_binary(summary) and summary != "",
-    do: sanitize_text(summary)
+  defp agent_activity_text(%{activity: [latest | _]}), do: sanitize_text(latest.text)
 
   defp agent_activity_text(_), do: "Awaiting directives"
 
-  # Session card summary — only show LLM-generated summaries, not heuristic tool labels
-  defp session_summary_text(%{activity: activity}) when is_list(activity) do
-    activity
-    |> Enum.find(fn entry -> Map.get(entry, :source) == :ollama end)
-    |> case do
-      %{text: text} -> sanitize_text(text)
-      nil -> "Awaiting summary..."
-    end
-  end
+  # Session card summary — prefer summary field, fall back to latest Ollama activity
+  defp session_summary_text(%{summary: summary})
+       when is_binary(summary) and summary != "" and summary != "Awaiting directives...",
+       do: sanitize_text(summary)
 
   defp session_summary_text(_), do: "Awaiting summary..."
 
-  defp raw_session_summary_text(%{activity: activity}) when is_list(activity) do
-    activity
-    |> Enum.find(fn entry -> Map.get(entry, :source) == :ollama end)
-    |> case do
-      %{text: text} -> text
-      nil -> "Awaiting summary..."
-    end
-  end
+  defp raw_session_summary_text(%{summary: summary})
+       when is_binary(summary) and summary != "" and summary != "Awaiting directives...",
+       do: summary
 
   defp raw_session_summary_text(_), do: "Awaiting summary..."
 
@@ -425,7 +444,7 @@ defmodule SamWeb.DashboardLive do
     |> String.trim()
     |> case do
       "" -> "Processing..."
-      s -> String.slice(s, 0, 80)
+      s -> String.slice(s, 0, 160)
     end
   end
 
@@ -483,25 +502,29 @@ defmodule SamWeb.DashboardLive do
           </div>
         </div>
         <div class="sam-topnav-actions">
-          <button
-            class="sam-topnav-btn"
-            onclick="window.samToggleSound && window.samToggleSound(this)"
-          >
-            <svg
-              width="14"
-              height="14"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              stroke-width="1.8"
-              stroke-linecap="round"
-              stroke-linejoin="round"
+          <span id="sound-btn-wrap" phx-update="ignore">
+            <button
+              class="sam-topnav-btn"
+              id="sound-btn"
+              style="opacity: 0.4;"
+              onclick="window.samToggleSound && window.samToggleSound(this)"
             >
-              <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" />
-              <path d="M15.54 8.46a5 5 0 0 1 0 7.07" />
-            </svg>
-            SOUND
-          </button>
+              <svg
+                width="14"
+                height="14"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="1.8"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              >
+                <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" />
+                <path d="M15.54 8.46a5 5 0 0 1 0 7.07" />
+              </svg>
+              SOUND
+            </button>
+          </span>
           <button class="sam-topnav-btn" phx-click="toggle_settings">
             <svg
               width="14"
@@ -517,7 +540,7 @@ defmodule SamWeb.DashboardLive do
             </svg>
             SETTINGS
           </button>
-          <button class="sam-topnav-btn danger" phx-click="kill_all">
+          <button class="sam-topnav-btn danger" phx-click="kill_all" data-confirm="Kill ALL sessions?">
             <svg
               width="14"
               height="14"
@@ -543,20 +566,40 @@ defmodule SamWeb.DashboardLive do
 
       <%!-- TAB BAR --%>
       <div class="sam-tabs">
-        <div
-          :for={id <- @session_ids}
-          :if={@sessions[id]}
-          class={"sam-tab #{if id == @selected_session, do: "active"} #{if @sessions[id][:ghost], do: "ghost"}"}
-          phx-click={if @sessions[id][:ghost], do: "restart_session", else: "select_session"}
-          phx-value-id={id}
-        >
-          <span class={"status-dot #{status_class(@sessions[id].status)}"}></span>
-          {@sessions[id].name || id}
-          <%= if @sessions[id][:ghost] do %>
-            <span class="ghost-label">RESTART</span>
-            <button class="ghost-dismiss" phx-click="dismiss_ghost" phx-value-id={id}>✕</button>
-          <% end %>
-        </div>
+        <%= for id <- @session_ids, @sessions[id] do %>
+          <div
+            id={"tab-#{id}"}
+            class={"sam-tab #{if id == @selected_session, do: "active"} #{if @sessions[id][:ghost], do: "ghost"}"}
+            phx-click={
+              if @editing_tab != id,
+                do: if(@sessions[id][:ghost], do: "restart_session", else: "select_session")
+            }
+            phx-value-id={id}
+            phx-hook={unless @sessions[id][:ghost], do: "DblClickRename"}
+          >
+            <span class={"status-dot #{status_class(@sessions[id].status)}"}></span>
+            <%= if @editing_tab == id do %>
+              <form phx-submit="rename_session" phx-click-away="cancel_rename" style="display:inline">
+                <input type="hidden" name="session_id" value={id} />
+                <input
+                  class="rename-input"
+                  type="text"
+                  name="name"
+                  value={@sessions[id].name || id}
+                  autofocus
+                  phx-key="Escape"
+                  phx-keydown="cancel_rename"
+                />
+              </form>
+            <% else %>
+              {@sessions[id].name || id}
+              <%= if @sessions[id][:ghost] do %>
+                <span class="ghost-label">RESTART</span>
+                <button class="ghost-dismiss" phx-click="dismiss_ghost" phx-value-id={id}>✕</button>
+              <% end %>
+            <% end %>
+          </div>
+        <% end %>
         <div class="sam-tab-actions">
           <button class="sam-btn-deploy" phx-click="toggle_new_dialog">+ DEPLOY AGENT</button>
         </div>
@@ -607,12 +650,13 @@ defmodule SamWeb.DashboardLive do
                 </form>
               <% else %>
                 <button class="sam-btn-outline" phx-click="toggle_terminal_modal">
-                  {if @show_terminal_modal, do: "HIDE TTY", else: "SHOW TTY"}
+                  {if @show_terminal_modal, do: "HIDE TERMINAL", else: "SHOW TERMINAL"}
                 </button>
                 <button
                   class="sam-btn-outline danger"
                   phx-click="kill_session"
                   phx-value-id={@selected_session}
+                  data-confirm="Terminate this session?"
                 >
                   TERMINATE
                 </button>
@@ -698,7 +742,7 @@ defmodule SamWeb.DashboardLive do
                     <%= if Map.get(item, :tool_count, 0) > 0 do %>
                       <span class="tool-count">{item.tool_count}</span>
                     <% end %>
-                    <span class={"msg #{activity_msg_class(item)}"} title={item.text}>
+                    <span class={"msg #{activity_msg_class(item)}"} data-tooltip={item.text}>
                       {sanitize_text(item.text)}
                     </span>
                   </div>
@@ -717,7 +761,7 @@ defmodule SamWeb.DashboardLive do
                   <span class="session-card-name">{state.name || id}</span>
                   <span class="session-card-time">{format_uptime(state)}</span>
                 </div>
-                <div class="session-card-summary" title={raw_session_summary_text(state)}>
+                <div class="session-card-summary" data-tooltip={raw_session_summary_text(state)}>
                   {session_summary_text(state)}
                 </div>
               </div>

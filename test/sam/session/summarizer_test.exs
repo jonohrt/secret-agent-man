@@ -1,77 +1,9 @@
 defmodule Sam.Session.SummarizerTest do
   use ExUnit.Case, async: false
 
-  describe "JSONL-based summarization" do
-    @tag :tmp_dir
-    test "summarizes from JSONL turns on decision point", %{tmp_dir: tmp_dir} do
-      session_id = "test-sum-jsonl-#{System.unique_integer([:positive])}"
-      jsonl_path = Path.join(tmp_dir, "session.jsonl")
-
-      records =
-        [
-          %{
-            "message" => %{
-              "role" => "assistant",
-              "content" => [
-                %{"type" => "text", "text" => "I'll fix the login bug by updating auth.ex"}
-              ]
-            }
-          },
-          %{
-            "message" => %{
-              "role" => "assistant",
-              "content" => [
-                %{"type" => "text", "text" => "Running tests to verify the fix"},
-                %{"type" => "tool_use", "name" => "Bash", "id" => "t1", "input" => %{}}
-              ]
-            }
-          }
-        ]
-        |> Enum.map(&Jason.encode!/1)
-
-      File.write!(jsonl_path, Enum.join(records, "\n") <> "\n")
-
-      Phoenix.PubSub.subscribe(Sam.PubSub, "session:#{session_id}")
-
-      {:ok, pid} =
-        Sam.Session.Summarizer.start_link(%{
-          session_id: session_id,
-          debounce_ms: 50
-        })
-
-      send(pid, {:journal_found, jsonl_path})
-
-      Sam.Session.Summarizer.push_event(pid, %{
-        type: :tool_call,
-        tool: "Edit",
-        timestamp: DateTime.utc_now()
-      })
-
-      assert_receive {:summary, ^session_id, %{summary: summary}}, 5000
-      assert is_binary(summary)
-      assert String.length(summary) > 0
-    end
-
-    @tag :tmp_dir
-    test "falls back to last assistant text when Ollama unavailable", %{tmp_dir: tmp_dir} do
-      session_id = "test-sum-fallback-#{System.unique_integer([:positive])}"
-      jsonl_path = Path.join(tmp_dir, "session.jsonl")
-
-      record =
-        Jason.encode!(%{
-          "message" => %{
-            "role" => "assistant",
-            "content" => [
-              %{
-                "type" => "text",
-                "text" => "I fixed the authentication bug in login.ex by adding a nil check"
-              }
-            ]
-          }
-        })
-
-      File.write!(jsonl_path, record <> "\n")
-
+  describe "heuristic summarization (no Ollama)" do
+    test "produces heuristic label on decision point event" do
+      session_id = "test-sum-heur-#{System.unique_integer([:positive])}"
       Phoenix.PubSub.subscribe(Sam.PubSub, "session:#{session_id}")
 
       {:ok, pid} =
@@ -81,37 +13,135 @@ defmodule Sam.Session.SummarizerTest do
           ollama_opts: [base_url: "http://localhost:1"]
         })
 
-      send(pid, {:journal_found, jsonl_path})
-
       Sam.Session.Summarizer.push_event(pid, %{
         type: :tool_call,
-        tool: "Read",
+        tool: "Edit",
+        description: "Fixing auth bug",
+        file: "lib/auth.ex",
         timestamp: DateTime.utc_now()
       })
 
-      assert_receive {:summary, ^session_id, %{summary: summary}}, 5000
-      assert is_binary(summary)
-      assert String.length(summary) > 0
+      assert_receive {:summary, ^session_id, payload}, 5000
+      assert payload.text == "Fixing auth bug"
+      assert payload.tool_count == 1
+      assert %DateTime{} = payload.timestamp
     end
 
-    test "produces no summary when no JSONL path available" do
-      session_id = "test-sum-nopath-#{System.unique_integer([:positive])}"
-
+    test "counts multiple tool_call events in a batch" do
+      session_id = "test-sum-count-#{System.unique_integer([:positive])}"
       Phoenix.PubSub.subscribe(Sam.PubSub, "session:#{session_id}")
 
       {:ok, pid} =
         Sam.Session.Summarizer.start_link(%{
           session_id: session_id,
-          debounce_ms: 50
+          debounce_ms: 50,
+          ollama_opts: [base_url: "http://localhost:1"]
         })
 
       Sam.Session.Summarizer.push_event(pid, %{
         type: :tool_call,
         tool: "Read",
+        description: "reading config",
         timestamp: DateTime.utc_now()
       })
 
-      refute_receive {:summary, ^session_id, _}, 500
+      Sam.Session.Summarizer.push_event(pid, %{
+        type: :tool_call,
+        tool: "Edit",
+        description: "fixing server",
+        timestamp: DateTime.utc_now()
+      })
+
+      Sam.Session.Summarizer.push_event(pid, %{
+        type: :tool_call,
+        tool: "Bash",
+        description: "running tests",
+        timestamp: DateTime.utc_now()
+      })
+
+      assert_receive {:summary, ^session_id, payload}, 5000
+      assert payload.tool_count == 3
+      assert payload.text == "running tests"
+    end
+
+    test "uses file path fallback when description is nil" do
+      session_id = "test-sum-file-#{System.unique_integer([:positive])}"
+      Phoenix.PubSub.subscribe(Sam.PubSub, "session:#{session_id}")
+
+      {:ok, pid} =
+        Sam.Session.Summarizer.start_link(%{
+          session_id: session_id,
+          debounce_ms: 50,
+          ollama_opts: [base_url: "http://localhost:1"]
+        })
+
+      Sam.Session.Summarizer.push_event(pid, %{
+        type: :tool_call,
+        tool: "Read",
+        description: nil,
+        file: "lib/sam/server.ex",
+        timestamp: DateTime.utc_now()
+      })
+
+      assert_receive {:summary, ^session_id, payload}, 5000
+      assert payload.text == "Read lib/sam/server.ex"
+    end
+
+    test "no summary when buffer is empty after debounce" do
+      session_id = "test-sum-empty-#{System.unique_integer([:positive])}"
+      Phoenix.PubSub.subscribe(Sam.PubSub, "session:#{session_id}")
+
+      {:ok, _pid} =
+        Sam.Session.Summarizer.start_link(%{
+          session_id: session_id,
+          debounce_ms: 50,
+          ollama_opts: [base_url: "http://localhost:1"]
+        })
+
+      refute_receive {:summary, ^session_id, _}, 200
+    end
+
+    test "receives events via PubSub parser_event" do
+      session_id = "test-sum-pubsub-#{System.unique_integer([:positive])}"
+      Phoenix.PubSub.subscribe(Sam.PubSub, "session:#{session_id}")
+
+      {:ok, _pid} =
+        Sam.Session.Summarizer.start_link(%{
+          session_id: session_id,
+          debounce_ms: 50,
+          ollama_opts: [base_url: "http://localhost:1"]
+        })
+
+      # Summarizer subscribes to session:#{id} and receives parser_events
+      Phoenix.PubSub.broadcast(
+        Sam.PubSub,
+        "session:#{session_id}",
+        {:parser_event, session_id,
+         %{
+           type: :tool_call,
+           tool: "Grep",
+           description: "searching logs",
+           timestamp: DateTime.utc_now()
+         }}
+      )
+
+      assert_receive {:summary, ^session_id, %{text: "searching logs"}}, 5000
+    end
+  end
+
+  describe "ollama mode detection" do
+    test "state tracks ollama_model as nil when unavailable" do
+      session_id = "test-sum-mode-#{System.unique_integer([:positive])}"
+
+      {:ok, pid} =
+        Sam.Session.Summarizer.start_link(%{
+          session_id: session_id,
+          debounce_ms: 50,
+          ollama_opts: [base_url: "http://localhost:1"]
+        })
+
+      state = :sys.get_state(pid)
+      assert state.ollama_model == nil
     end
   end
 end

@@ -561,9 +561,11 @@ body::before {
   color: var(--outline);
   padding-left: 11px;
   margin-top: 2px;
-  white-space: nowrap;
   overflow: hidden;
-  text-overflow: ellipsis;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  line-height: 1.4;
 }
 
 /* ============================================
@@ -648,8 +650,10 @@ body::before {
   color: var(--on-surface-variant);
   min-width: 0;
   overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  line-height: 1.4;
 }
 
 .activity-item .msg.system {
@@ -732,9 +736,11 @@ body::before {
   font-size: 0.75rem;
   color: var(--outline);
   padding-left: 11px;
-  white-space: nowrap;
   overflow: hidden;
-  text-overflow: ellipsis;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  line-height: 1.4;
 }
 
 /* ============================================
@@ -1151,4 +1157,29 @@ body::before {
   background: var(--outline);
   opacity: 0.4;
   box-shadow: none;
+}
+
+/* Instant tooltips (no browser delay) */
+[data-tooltip] {
+  position: relative;
+}
+[data-tooltip]:hover::after {
+  content: attr(data-tooltip);
+  position: absolute;
+  left: 0;
+  top: 100%;
+  margin-top: 4px;
+  background: var(--surface-dim);
+  color: var(--on-surface);
+  border: 1px solid var(--outline);
+  border-radius: 4px;
+  padding: 6px 10px;
+  font-size: 0.75rem;
+  font-family: var(--font-mono);
+  line-height: 1.4;
+  white-space: pre-wrap;
+  max-width: 400px;
+  z-index: 100;
+  pointer-events: none;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
 }

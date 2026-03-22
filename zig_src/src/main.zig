@@ -165,12 +165,18 @@ fn doExec(cmd: SpawnCmd) noreturn {
     _ = c.setenv("LC_ALL", "en_US.UTF-8", 1);
     _ = c.setenv("TERM", "xterm-256color", 1);
 
-    // Set custom environment variables
+    // Set custom environment variables (empty value = unset)
     for (cmd.env) |ev| {
         const key_z = dupeZ(ev.key);
-        const val_z = dupeZ(ev.value);
-        if (key_z != null and val_z != null) {
-            _ = c.setenv(key_z, val_z, 1);
+        if (key_z != null) {
+            if (ev.value.len == 0) {
+                _ = c.unsetenv(key_z);
+            } else {
+                const val_z = dupeZ(ev.value);
+                if (val_z != null) {
+                    _ = c.setenv(key_z, val_z, 1);
+                }
+            }
         }
     }
 

@@ -1,0 +1,6 @@
+home = System.user_home!()
+path = Path.join(home, ".config/secret-agent-man/data/sam_sessions") |> to_charlist()
+{:ok, table} = :dets.open_file(:sam_debug, file: path, type: :set)
+sessions = :dets.foldl(fn {id, data}, acc -> [{id, data} | acc] end, [], table)
+:dets.close(table)
+IO.inspect(sessions, label: "DETS contents", limit: :infinity, printable_limit: :infinity)

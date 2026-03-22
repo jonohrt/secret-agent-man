@@ -41,7 +41,7 @@ defmodule Sam.Session.ServerTest do
       send(
         pid,
         {:parser_event, session_id,
-         %{type: :pre_tool_call, tool: "Read", timestamp: DateTime.utc_now()}}
+         %{type: :tool_call, tool: "Read", timestamp: DateTime.utc_now()}}
       )
 
       assert_receive {:session_update, ^session_id, state}, 1000
@@ -51,7 +51,7 @@ defmodule Sam.Session.ServerTest do
     end
   end
 
-  describe "hook-event status detection" do
+  describe "JSONL event status detection" do
     setup do
       session_id = "test-status-#{System.unique_integer([:positive])}"
       Phoenix.PubSub.subscribe(Sam.PubSub, "sessions:ui")
@@ -117,22 +117,22 @@ defmodule Sam.Session.ServerTest do
       assert_receive {:session_update, ^id, %{status: :needs_input}}, 1000
     end
 
-    test "stays working until post_tool_call + idle timeout", %{session_id: id, pid: pid} do
+    test "stays working until tool_result + idle timeout", %{session_id: id, pid: pid} do
       # Start working
       send(
         pid,
-        {:parser_event, id, %{type: :pre_tool_call, tool: "Bash", timestamp: DateTime.utc_now()}}
+        {:parser_event, id, %{type: :tool_call, tool: "Bash", timestamp: DateTime.utc_now()}}
       )
 
       assert_receive {:session_update, ^id, %{status: :working}}, 1000
 
-      # Should NOT go idle even after 150ms — no post_tool_call yet
+      # Should NOT go idle even after 150ms — no tool_result yet
       refute_receive {:session_update, ^id, %{status: :idle}}, 150
 
       # Tool finishes
       send(
         pid,
-        {:parser_event, id, %{type: :post_tool_call, tool: "Bash", timestamp: DateTime.utc_now()}}
+        {:parser_event, id, %{type: :tool_result, tool: "Bash", timestamp: DateTime.utc_now()}}
       )
 
       # NOW should go idle after the 100ms timeout
@@ -278,6 +278,224 @@ defmodule Sam.Session.ServerTest do
       agent = List.first(state.agents)
       assert agent.description == "subagent"
       assert agent.description != ""
+    end
+  end
+
+  describe "rename/2" do
+    test "updates name in state" do
+      session_id = "test-rename-#{System.unique_integer([:positive])}"
+      _pid = start_supervised!({Sam.Session.Server, %{session_id: session_id, name: "Old Name"}})
+
+      assert :ok = Sam.Session.Server.rename(session_id, "New Name")
+
+      state = Sam.Session.Server.get_state(session_id)
+      assert state.name == "New Name"
+    end
+
+    test "broadcasts UI update on rename" do
+      session_id = "test-rename-bc-#{System.unique_integer([:positive])}"
+      Phoenix.PubSub.subscribe(Sam.PubSub, "sessions:ui")
+
+      _pid = start_supervised!({Sam.Session.Server, %{session_id: session_id, name: "Before"}})
+      assert_receive {:session_update, ^session_id, %{name: "Before"}}, 1000
+
+      Sam.Session.Server.rename(session_id, "After")
+      assert_receive {:session_update, ^session_id, %{name: "After"}}, 1000
+    end
+
+    test "trims whitespace from name" do
+      session_id = "test-rename-trim-#{System.unique_integer([:positive])}"
+      _pid = start_supervised!({Sam.Session.Server, %{session_id: session_id, name: "Old"}})
+
+      Sam.Session.Server.rename(session_id, "  Trimmed  ")
+
+      state = Sam.Session.Server.get_state(session_id)
+      assert state.name == "Trimmed"
+    end
+
+    test "rejects empty name" do
+      session_id = "test-rename-empty-#{System.unique_integer([:positive])}"
+      _pid = start_supervised!({Sam.Session.Server, %{session_id: session_id, name: "Keep Me"}})
+
+      assert {:error, :empty_name} = Sam.Session.Server.rename(session_id, "")
+      assert {:error, :empty_name} = Sam.Session.Server.rename(session_id, "   ")
+
+      state = Sam.Session.Server.get_state(session_id)
+      assert state.name == "Keep Me"
+    end
+  end
+
+  describe "JSONL-driven status" do
+    setup do
+      session_id = "test-jsonl-#{System.unique_integer([:positive])}"
+      Phoenix.PubSub.subscribe(Sam.PubSub, "sessions:ui")
+
+      {:ok, pid} =
+        GenServer.start_link(Sam.Session.Server, %{
+          session_id: session_id,
+          name: "JSONL Test",
+          idle_timeout_ms: 100,
+          needs_input_timeout_ms: 200
+        })
+
+      assert_receive {:session_update, ^session_id, %{status: :idle}}, 1000
+      %{session_id: session_id, pid: pid}
+    end
+
+    test "turn_end event transitions immediately to :idle (no timer)", %{
+      session_id: id,
+      pid: pid
+    } do
+      # Start working
+      send(
+        pid,
+        {:parser_event, id, %{type: :tool_call, tool: "Read", timestamp: DateTime.utc_now()}}
+      )
+
+      assert_receive {:session_update, ^id, %{status: :working}}, 1000
+
+      # turn_end = immediate idle, no waiting for timer
+      send(pid, {:parser_event, id, %{type: :turn_end, timestamp: DateTime.utc_now()}})
+      assert_receive {:session_update, ^id, %{status: :idle}}, 500
+    end
+
+    test "needs_input_timeout fires after silence during tool execution", %{
+      session_id: id,
+      pid: pid
+    } do
+      # Start working with a non-exempt tool
+      send(
+        pid,
+        {:parser_event, id,
+         %{
+           type: :tool_call,
+           tool: "Bash",
+           timestamp: DateTime.utc_now()
+         }}
+      )
+
+      assert_receive {:session_update, ^id, %{status: :working}}, 1000
+
+      # After needs_input_timeout_ms (200ms in test), should go to needs_input
+      assert_receive {:session_update, ^id, %{status: :needs_input}}, 1000
+    end
+
+    test "user_prompt transitions to :working", %{session_id: id, pid: pid} do
+      send(pid, {:parser_event, id, %{type: :user_prompt, timestamp: DateTime.utc_now()}})
+      assert_receive {:session_update, ^id, %{status: :working}}, 1000
+    end
+
+    test "assistant_response transitions to :working", %{session_id: id, pid: pid} do
+      send(pid, {:parser_event, id, %{type: :assistant_response, timestamp: DateTime.utc_now()}})
+      assert_receive {:session_update, ^id, %{status: :working}}, 1000
+    end
+
+    test "needs_input timer does NOT fire for exempt tools (Agent)", %{
+      session_id: id,
+      pid: pid
+    } do
+      send(
+        pid,
+        {:parser_event, id,
+         %{
+           type: :tool_call,
+           tool: "Agent",
+           description: "test",
+           timestamp: DateTime.utc_now()
+         }}
+      )
+
+      assert_receive {:session_update, ^id, %{status: :working}}, 1000
+
+      # Should NOT go to needs_input — Agent is exempt
+      refute_receive {:session_update, ^id, %{status: :needs_input}}, 400
+    end
+
+    test "tool_result cancels needs_input timer", %{
+      session_id: id,
+      pid: pid
+    } do
+      send(
+        pid,
+        {:parser_event, id, %{type: :tool_call, tool: "Bash", timestamp: DateTime.utc_now()}}
+      )
+
+      assert_receive {:session_update, ^id, %{status: :working}}, 1000
+
+      # Immediately send tool_result (before needs_input timeout)
+      send(
+        pid,
+        {:parser_event, id, %{type: :tool_result, tool: "Bash", timestamp: DateTime.utc_now()}}
+      )
+
+      # Should NOT go to needs_input — timer was cancelled
+      refute_receive {:session_update, ^id, %{status: :needs_input}}, 400
+    end
+
+    test "pty_output with prompt character ❯ transitions working to idle instantly", %{
+      session_id: id,
+      pid: pid
+    } do
+      # Start working via assistant_response (text-only, would normally wait 5s)
+      send(pid, {:parser_event, id, %{type: :assistant_response, timestamp: DateTime.utc_now()}})
+      assert_receive {:session_update, ^id, %{status: :working}}, 1000
+
+      # PTY output containing the prompt character should instantly go idle
+      send(pid, {:pty_output, id, "\e[1m❯\e[0m "})
+      assert_receive {:session_update, ^id, %{status: :idle}}, 500
+    end
+
+    test "pty_output without prompt character does NOT change status", %{
+      session_id: id,
+      pid: pid
+    } do
+      send(pid, {:parser_event, id, %{type: :assistant_response, timestamp: DateTime.utc_now()}})
+      assert_receive {:session_update, ^id, %{status: :working}}, 1000
+
+      # Normal output without ❯ should NOT change status
+      send(pid, {:pty_output, id, "Hello, the answer is 4.\r\n"})
+      refute_receive {:session_update, ^id, %{status: :idle}}, 300
+    end
+
+    test "pty_output prompt detection only fires when working", %{
+      session_id: id,
+      pid: pid
+    } do
+      # Should be idle already
+      state = :sys.get_state(pid)
+      assert state.status == :idle
+
+      # Prompt character while idle should NOT trigger a broadcast
+      send(pid, {:pty_output, id, "❯ "})
+      refute_receive {:session_update, ^id, _}, 300
+    end
+
+    test "stale JSONL events after prompt detection are suppressed", %{
+      session_id: id,
+      pid: pid
+    } do
+      # Start working
+      send(pid, {:parser_event, id, %{type: :assistant_response, timestamp: DateTime.utc_now()}})
+      assert_receive {:session_update, ^id, %{status: :working}}, 1000
+
+      # Prompt detected → idle
+      send(pid, {:pty_output, id, "❯ "})
+      assert_receive {:session_update, ^id, %{status: :idle}}, 500
+
+      # Stale JSONL events arriving after prompt should NOT flip back to working
+      send(pid, {:parser_event, id, %{type: :assistant_response, timestamp: DateTime.utc_now()}})
+      refute_receive {:session_update, ^id, %{status: :working}}, 300
+
+      send(
+        pid,
+        {:parser_event, id, %{type: :tool_call, tool: "Read", timestamp: DateTime.utc_now()}}
+      )
+
+      refute_receive {:session_update, ^id, %{status: :working}}, 300
+
+      # But user_prompt (new interaction) should clear suppression and go working
+      send(pid, {:parser_event, id, %{type: :user_prompt, timestamp: DateTime.utc_now()}})
+      assert_receive {:session_update, ^id, %{status: :working}}, 1000
     end
   end
 

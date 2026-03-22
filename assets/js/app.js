@@ -30,11 +30,21 @@ import TerminalHook from "./terminal"
 import NotificationsHook from "./notifications"
 import AuxTerminalHook from "./aux_terminal"
 
+const DblClickRenameHook = {
+  mounted() {
+    this.el.addEventListener("dblclick", () => {
+      const id = this.el.getAttribute("phx-value-id")
+      if (id) this.pushEvent("start_rename", {id})
+    })
+  }
+}
+
 const csrfToken = document.querySelector("meta[name='csrf-token']").getAttribute("content")
 const liveSocket = new LiveSocket("/live", Socket, {
   longPollFallbackMs: 2500,
   params: {_csrf_token: csrfToken},
-  hooks: {...colocatedHooks, Terminal: TerminalHook, Notifications: NotificationsHook, AuxTerminal: AuxTerminalHook},
+  hooks: {...colocatedHooks, Terminal: TerminalHook, Notifications: NotificationsHook, AuxTerminal: AuxTerminalHook, DblClickRename: DblClickRenameHook},
+  heartbeatIntervalMs: 60_000,
 })
 
 // Show progress bar on live navigation and form submits

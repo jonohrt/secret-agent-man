@@ -3,6 +3,12 @@ defmodule Sam.Session.Server do
   require Logger
 
   @idle_timeout_ms 10_000
+  @needs_input_timeout_ms 7_000
+  @text_idle_delay_ms 5_000
+  @permission_exempt_tools ~w(Agent Task AskUserQuestion)
+
+  # How long after prompt detection to suppress stale JSONL events
+  @prompt_suppression_ms 3_000
 
   defstruct [
     :session_id,
@@ -12,7 +18,10 @@ defmodule Sam.Session.Server do
     :workdir,
     :idle_timer,
     :idle_timeout_ms,
+    :needs_input_timer,
+    :needs_input_timeout_ms,
     :started_at,
+    :prompt_detected_at,
     status: :idle,
     activity: [],
     agents: [],
@@ -38,8 +47,8 @@ defmodule Sam.Session.Server do
     GenServer.cast(via(session_id), {:resize, cols, rows})
   end
 
-  def push_hook_event(session_id, event) do
-    GenServer.cast(via(session_id), {:hook_event, event})
+  def rename(session_id, new_name) do
+    GenServer.call(via(session_id), {:rename, new_name})
   end
 
   def stop(session_id) do
@@ -69,6 +78,7 @@ defmodule Sam.Session.Server do
       workdir: workdir,
       branch: detect_branch(workdir),
       idle_timeout_ms: Map.get(opts, :idle_timeout_ms, @idle_timeout_ms),
+      needs_input_timeout_ms: Map.get(opts, :needs_input_timeout_ms, @needs_input_timeout_ms),
       started_at: DateTime.utc_now(),
       status: :idle
     }
@@ -83,26 +93,25 @@ defmodule Sam.Session.Server do
   end
 
   @impl true
+  def handle_call({:rename, new_name}, _from, state) do
+    trimmed = String.trim(new_name)
+
+    if trimmed == "" do
+      {:reply, {:error, :empty_name}, state}
+    else
+      state = %{state | name: trimmed}
+      broadcast_ui_update(state)
+      {:reply, :ok, state}
+    end
+  end
+
+  @impl true
   def handle_cast({:send_input, data}, state) do
-    # Terminal states — ignore input
     if state.status in [:done, :error] do
       {:noreply, state}
     else
       Phoenix.PubSub.broadcast(Sam.PubSub, "session_input:#{state.session_id}", {:input, data})
-
-      # User pressed Enter → Claude is about to work
-      # Start a fallback idle timer — if no hook fires (e.g., simple text response
-      # with no tool use), we'll fall back to idle after 30s instead of being stuck
-      if state.status in [:idle, :needs_input, :background] and
-           String.contains?(data, ["\n", "\r"]) do
-        state = cancel_idle_timer(state)
-        timer = Process.send_after(self(), :idle_timeout, 30_000)
-        state = %{state | status: :working, idle_timer: timer}
-        broadcast_ui_update(state)
-        {:noreply, state}
-      else
-        {:noreply, state}
-      end
+      {:noreply, state}
     end
   end
 
@@ -123,17 +132,6 @@ defmodule Sam.Session.Server do
     {:stop, :normal, state}
   end
 
-  @impl true
-  def handle_cast({:hook_event, event}, state) do
-    Phoenix.PubSub.broadcast(
-      Sam.PubSub,
-      "session:#{state.session_id}",
-      {:parser_event, state.session_id, Sam.Session.Parser.parse_hook_event(event)}
-    )
-
-    {:noreply, state}
-  end
-
   ## PubSub event handlers
 
   @impl true
@@ -148,14 +146,65 @@ defmodule Sam.Session.Server do
     end
   end
 
+  # User submitted a new prompt → working (clears prompt suppression)
   @impl true
-  def handle_info({:parser_event, _, %{type: type} = event}, state)
-      when type in [:tool_call, :pre_tool_call] do
+  def handle_info({:parser_event, _, %{type: :user_prompt}}, state) do
     if state.status in [:done, :error] do
+      {:noreply, state}
+    else
+      state = cancel_idle_timer(state)
+      state = cancel_needs_input_timer(state)
+      state = %{state | status: :working, prompt_detected_at: nil}
+      broadcast_ui_update(state)
+      {:noreply, state}
+    end
+  end
+
+  # Assistant text response (no tools) → working, with fallback idle timer
+  # turn_duration may never arrive for simple text responses
+  @impl true
+  def handle_info({:parser_event, _, %{type: :assistant_response}}, state) do
+    if state.status in [:done, :error] or prompt_suppressed?(state) do
+      {:noreply, state}
+    else
+      state = cancel_idle_timer(state)
+      state = cancel_needs_input_timer(state)
+      state = %{state | status: :working}
+      broadcast_ui_update(state)
+      # Fallback: if no turn_duration arrives within 5s, assume turn ended
+      timer = Process.send_after(self(), :idle_timeout, @text_idle_delay_ms)
+      {:noreply, %{state | idle_timer: timer}}
+    end
+  end
+
+  # Tool still running — reset needs_input timer
+  @impl true
+  def handle_info({:parser_event, _, %{type: :tool_progress}}, state) do
+    if state.status in [:done, :error] do
+      {:noreply, state}
+    else
+      # If we were falsely set to needs_input, go back to working
+      state =
+        if state.status == :needs_input do
+          %{state | status: :working}
+        else
+          state
+        end
+
+      state = cancel_needs_input_timer(state)
+      state = start_needs_input_timer(state)
+      {:noreply, state}
+    end
+  end
+
+  @impl true
+  def handle_info({:parser_event, _, %{type: :tool_call} = event}, state) do
+    if state.status in [:done, :error] or prompt_suppressed?(state) do
       {:noreply, state}
     else
       # Tool starting — set working, NO idle timer (tool is still running)
       state = cancel_idle_timer(state)
+      state = cancel_needs_input_timer(state)
 
       tool = Map.get(event, :tool, "unknown")
 
@@ -184,16 +233,25 @@ defmodule Sam.Session.Server do
 
       state = %{state | status: :working}
       broadcast_ui_update(state)
+
+      # Start needs_input timer for non-exempt tools (permission prompts)
+      state =
+        if tool not in @permission_exempt_tools do
+          start_needs_input_timer(state)
+        else
+          state
+        end
+
       {:noreply, state}
     end
   end
 
   @impl true
-  def handle_info({:parser_event, _, %{type: type} = event}, state)
-      when type in [:tool_result, :post_tool_call] do
-    if state.status in [:done, :error] do
+  def handle_info({:parser_event, _, %{type: :tool_result} = event}, state) do
+    if state.status in [:done, :error] or prompt_suppressed?(state) do
       {:noreply, state}
     else
+      state = cancel_needs_input_timer(state)
       tool = Map.get(event, :tool, "unknown")
 
       # Mark first working agent as done when Agent tool completes
@@ -224,6 +282,19 @@ defmodule Sam.Session.Server do
   end
 
   @impl true
+  def handle_info({:parser_event, _, %{type: :turn_end}}, state) do
+    if state.status in [:done, :error] do
+      {:noreply, state}
+    else
+      state = cancel_idle_timer(state)
+      state = cancel_needs_input_timer(state)
+      state = %{state | status: :idle}
+      broadcast_ui_update(state)
+      {:noreply, state}
+    end
+  end
+
+  @impl true
   def handle_info({:parser_event, _, _}, state), do: {:noreply, state}
 
   @impl true
@@ -241,8 +312,33 @@ defmodule Sam.Session.Server do
     {:noreply, state}
   end
 
+  # Detect Claude Code's prompt character ❯ (U+276F) for instant idle
+  @prompt_bytes <<0xE2, 0x9D, 0xAF>>
+
   @impl true
-  def handle_info({:pty_output, _, _}, state), do: {:noreply, state}
+  def handle_info({:pty_output, _, data}, state) do
+    if state.status in [:working, :needs_input] and
+         :binary.match(data, @prompt_bytes) != :nomatch do
+      state = cancel_idle_timer(state)
+      state = cancel_needs_input_timer(state)
+      state = %{state | status: :idle, prompt_detected_at: System.monotonic_time(:millisecond)}
+      broadcast_ui_update(state)
+      {:noreply, state}
+    else
+      {:noreply, state}
+    end
+  end
+
+  @impl true
+  def handle_info(:needs_input_timeout, state) do
+    if state.status == :working do
+      state = %{state | status: :needs_input, needs_input_timer: nil}
+      broadcast_ui_update(state)
+      {:noreply, state}
+    else
+      {:noreply, %{state | needs_input_timer: nil}}
+    end
+  end
 
   @impl true
   def handle_info(:idle_timeout, state) do
@@ -275,7 +371,19 @@ defmodule Sam.Session.Server do
     {:noreply, state}
   end
 
+  # Ignore journal_found — handled by TranscriptWatcher
+  @impl true
+  def handle_info({:journal_found, _path}, state), do: {:noreply, state}
+
   ## Private helpers
+
+  # Returns true if a stale JSONL event should be suppressed because
+  # we recently detected the prompt character in PTY output.
+  defp prompt_suppressed?(%{prompt_detected_at: nil}), do: false
+
+  defp prompt_suppressed?(%{prompt_detected_at: ts}) do
+    System.monotonic_time(:millisecond) - ts < @prompt_suppression_ms
+  end
 
   defp mark_first_working_agent_done(state) do
     {updated, _found} =
@@ -295,6 +403,18 @@ defmodule Sam.Session.Server do
   defp cancel_idle_timer(%{idle_timer: ref} = state) do
     Process.cancel_timer(ref)
     %{state | idle_timer: nil}
+  end
+
+  defp cancel_needs_input_timer(%{needs_input_timer: nil} = state), do: state
+
+  defp cancel_needs_input_timer(%{needs_input_timer: ref} = state) do
+    Process.cancel_timer(ref)
+    %{state | needs_input_timer: nil}
+  end
+
+  defp start_needs_input_timer(state) do
+    timer = Process.send_after(self(), :needs_input_timeout, state.needs_input_timeout_ms)
+    %{state | needs_input_timer: timer}
   end
 
   # Force binary to valid UTF-8 by replacing ALL invalid byte sequences with U+FFFD.
@@ -328,7 +448,13 @@ defmodule Sam.Session.Server do
         %{entry | text: sanitize_utf8(Map.get(entry, :text, ""))}
       end)
 
-    %{state | idle_timer: nil, activity: clean_activity, summary: sanitize_utf8(state.summary)}
+    %{
+      state
+      | idle_timer: nil,
+        needs_input_timer: nil,
+        activity: clean_activity,
+        summary: sanitize_utf8(state.summary)
+    }
   end
 
   defp detect_branch(workdir) when is_binary(workdir) do

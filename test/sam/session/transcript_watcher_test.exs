@@ -55,47 +55,87 @@ defmodule Sam.Session.TranscriptWatcherTest do
     end
   end
 
-  @tag :tmp_dir
-  test "transitions from waiting to watching on journal_found", %{tmp_dir: tmp_dir} do
-    session_id = "test-tw-jf-#{System.unique_integer([:positive])}"
-    jsonl_path = Path.join(tmp_dir, "session.jsonl")
-    File.write!(jsonl_path, "")
+  describe "deterministic JSONL path from claude_session_id" do
+    @tag :tmp_dir
+    test "constructs deterministic JSONL path from claude_session_id", %{tmp_dir: tmp_dir} do
+      session_id = "test-det-#{System.unique_integer([:positive])}"
+      claude_session_id = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
 
-    Phoenix.PubSub.subscribe(Sam.PubSub, "session:#{session_id}")
+      project_dir = Path.join(tmp_dir, "project")
+      File.mkdir_p!(project_dir)
+      jsonl_path = Path.join(project_dir, "#{claude_session_id}.jsonl")
+      File.write!(jsonl_path, "")
 
-    # Start watcher WITHOUT a test path (simulates waiting state)
-    {:ok, pid} =
-      GenServer.start_link(Sam.Session.TranscriptWatcher, %{
-        session_id: session_id,
-        workdir: nil,
-        _test_project_dir: Path.join(tmp_dir, "nonexistent")
-      })
+      Phoenix.PubSub.subscribe(Sam.PubSub, "session:#{session_id}")
 
-    # Verify it's in waiting state (no path found)
-    state = :sys.get_state(pid)
-    assert state.path == nil
+      {:ok, pid} =
+        GenServer.start_link(Sam.Session.TranscriptWatcher, %{
+          session_id: session_id,
+          workdir: nil,
+          claude_session_id: claude_session_id,
+          _test_project_dir: project_dir
+        })
 
-    # Send journal_found
-    send(pid, {:journal_found, jsonl_path})
+      Process.sleep(1500)
 
-    # Give it time to process
-    Process.sleep(200)
+      record =
+        Jason.encode!(%{
+          "message" => %{
+            "role" => "assistant",
+            "content" => [%{"type" => "tool_use", "id" => "t1", "name" => "Read", "input" => %{}}]
+          }
+        })
 
-    # Now append data and verify events flow
-    record =
-      Jason.encode!(%{
-        "message" => %{
-          "role" => "assistant",
-          "content" => [
-            %{"type" => "tool_use", "id" => "t1", "name" => "Read", "input" => %{}}
-          ]
-        }
-      })
+      File.write!(jsonl_path, record <> "\n", [:append])
+      assert_receive {:parser_event, ^session_id, %{type: :tool_call, tool: "Read"}}, 3000
 
-    File.write!(jsonl_path, record <> "\n", [:append])
-    assert_receive {:parser_event, ^session_id, %{type: :tool_call, tool: "Read"}}, 3000
+      GenServer.stop(pid)
+    end
 
-    GenServer.stop(pid)
+    @tag :tmp_dir
+    test "waits for JSONL file to appear when claude_session_id given but file not yet created",
+         %{tmp_dir: tmp_dir} do
+      session_id = "test-wait-#{System.unique_integer([:positive])}"
+      claude_session_id = "11111111-2222-3333-4444-555555555555"
+
+      project_dir = Path.join(tmp_dir, "project")
+      File.mkdir_p!(project_dir)
+      jsonl_path = Path.join(project_dir, "#{claude_session_id}.jsonl")
+      # NOTE: File does NOT exist yet
+
+      Phoenix.PubSub.subscribe(Sam.PubSub, "session:#{session_id}")
+
+      {:ok, pid} =
+        GenServer.start_link(Sam.Session.TranscriptWatcher, %{
+          session_id: session_id,
+          workdir: nil,
+          claude_session_id: claude_session_id,
+          _test_project_dir: project_dir
+        })
+
+      # Should be in waiting_for_file state
+      state = :sys.get_state(pid)
+      assert state.waiting_for_file == true
+
+      # Now create the file and write data
+      File.write!(jsonl_path, "")
+      Process.sleep(1500)
+
+      record =
+        Jason.encode!(%{
+          "message" => %{
+            "role" => "assistant",
+            "content" => [
+              %{"type" => "tool_use", "id" => "t1", "name" => "Bash", "input" => %{}}
+            ]
+          }
+        })
+
+      File.write!(jsonl_path, record <> "\n", [:append])
+      assert_receive {:parser_event, ^session_id, %{type: :tool_call, tool: "Bash"}}, 3000
+
+      GenServer.stop(pid)
+    end
   end
 
   @tag :tmp_dir
@@ -165,7 +205,7 @@ defmodule Sam.Session.TranscriptWatcherTest do
   end
 
   @tag :tmp_dir
-  test "emits tool_result for turn_duration system record", %{tmp_dir: tmp_dir} do
+  test "emits turn_end for turn_duration system record", %{tmp_dir: tmp_dir} do
     session_id = "test-tw-#{System.unique_integer([:positive])}"
     jsonl_path = Path.join(tmp_dir, "test-session.jsonl")
     File.write!(jsonl_path, "")
@@ -184,7 +224,69 @@ defmodule Sam.Session.TranscriptWatcherTest do
     record = Jason.encode!(%{"type" => "system", "subtype" => "turn_duration"})
     File.write!(jsonl_path, record <> "\n", [:append])
 
-    assert_receive {:parser_event, ^session_id, %{type: :tool_result, tool: "turn_end"}}, 3000
+    assert_receive {:parser_event, ^session_id, %{type: :turn_end}}, 3000
+
+    GenServer.stop(pid)
+  end
+
+  @tag :tmp_dir
+  test "emits user_prompt for user record with string content", %{tmp_dir: tmp_dir} do
+    session_id = "test-tw-#{System.unique_integer([:positive])}"
+    jsonl_path = Path.join(tmp_dir, "test-session.jsonl")
+    File.write!(jsonl_path, "")
+
+    Phoenix.PubSub.subscribe(Sam.PubSub, "session:#{session_id}")
+
+    {:ok, pid} =
+      GenServer.start_link(Sam.Session.TranscriptWatcher, %{
+        session_id: session_id,
+        workdir: nil,
+        _test_jsonl_path: jsonl_path
+      })
+
+    _ = :sys.get_state(pid)
+
+    record =
+      Jason.encode!(%{
+        "type" => "user",
+        "message" => %{"role" => "user", "content" => "fix the bug"}
+      })
+
+    File.write!(jsonl_path, record <> "\n", [:append])
+
+    assert_receive {:parser_event, ^session_id, %{type: :user_prompt}}, 3000
+
+    GenServer.stop(pid)
+  end
+
+  @tag :tmp_dir
+  test "emits assistant_response for text-only assistant message", %{tmp_dir: tmp_dir} do
+    session_id = "test-tw-#{System.unique_integer([:positive])}"
+    jsonl_path = Path.join(tmp_dir, "test-session.jsonl")
+    File.write!(jsonl_path, "")
+
+    Phoenix.PubSub.subscribe(Sam.PubSub, "session:#{session_id}")
+
+    {:ok, pid} =
+      GenServer.start_link(Sam.Session.TranscriptWatcher, %{
+        session_id: session_id,
+        workdir: nil,
+        _test_jsonl_path: jsonl_path
+      })
+
+    _ = :sys.get_state(pid)
+
+    record =
+      Jason.encode!(%{
+        "message" => %{
+          "role" => "assistant",
+          "content" => [%{"type" => "text", "text" => "Hello!"}]
+        }
+      })
+
+    File.write!(jsonl_path, record <> "\n", [:append])
+
+    assert_receive {:parser_event, ^session_id, %{type: :assistant_response}}, 3000
 
     GenServer.stop(pid)
   end

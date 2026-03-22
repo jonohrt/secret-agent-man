@@ -2,7 +2,10 @@
 const NotificationsHook = {
   mounted() {
     this.permissionGranted = false
-    this.soundEnabled = localStorage.getItem("sam-sound-muted") !== "true"
+    this.soundEnabled = localStorage.getItem("sam-sound-enabled") === "true"
+    // Sync button opacity with initial state
+    const soundBtn = document.getElementById("sound-btn")
+    if (soundBtn) soundBtn.style.opacity = this.soundEnabled ? "1" : "0.4"
     this.audioCtx = null
 
     // Request notification permission
@@ -18,7 +21,7 @@ const NotificationsHook = {
     const self = this
     window.samToggleSound = (btn) => {
       self.soundEnabled = !self.soundEnabled
-      localStorage.setItem("sam-sound-muted", !self.soundEnabled)
+      localStorage.setItem("sam-sound-enabled", self.soundEnabled)
       btn.style.opacity = self.soundEnabled ? "1" : "0.4"
     }
 

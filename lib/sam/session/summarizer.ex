@@ -3,9 +3,10 @@ defmodule Sam.Session.Summarizer do
   require Logger
 
   @default_debounce_ms 5_000
-  @decision_point_types [:tool_call, :input_needed, :agent_spawn, :completion, :activity]
+  @decision_point_types [:tool_call, :tool_result, :input_needed, :agent_spawn, :completion, :activity, :turn_end, :assistant_response]
+  @health_check_interval_ms 60_000
 
-  defstruct [:session_id, :debounce_ms, :timer_ref, :jsonl_path, :ollama_opts, buffer: []]
+  defstruct [:session_id, :debounce_ms, :timer_ref, :ollama_model, :ollama_opts, buffer: []]
 
   def start_link(opts) do
     GenServer.start_link(__MODULE__, opts)
@@ -20,11 +21,22 @@ defmodule Sam.Session.Summarizer do
     session_id = Map.fetch!(opts, :session_id)
     Phoenix.PubSub.subscribe(Sam.PubSub, "session:#{session_id}")
 
+    ollama_opts = Map.get(opts, :ollama_opts, [])
+    model = detect_ollama(ollama_opts)
+
+    if model do
+      Logger.info("[Summarizer] Ollama available: #{model}")
+    else
+      Logger.info("[Summarizer] Ollama unavailable, using heuristic labels")
+      schedule_health_check()
+    end
+
     {:ok,
      %__MODULE__{
        session_id: session_id,
        debounce_ms: Map.get(opts, :debounce_ms, @default_debounce_ms),
-       ollama_opts: Map.get(opts, :ollama_opts, [])
+       ollama_opts: ollama_opts,
+       ollama_model: model
      }}
   end
 
@@ -39,14 +51,27 @@ defmodule Sam.Session.Summarizer do
     {:noreply, %{state | timer_ref: nil}}
   end
 
-  def handle_info({:journal_found, path}, state) do
-    Logger.info("[Summarizer] Received journal path: #{Path.basename(path)}")
-    {:noreply, %{state | jsonl_path: path}}
+  # Ignore journal_found — handled by TranscriptWatcher
+  def handle_info({:journal_found, _path}, state), do: {:noreply, state}
+
+  def handle_info(:health_check, state) do
+    if state.ollama_model == nil do
+      case detect_ollama(state.ollama_opts) do
+        nil ->
+          schedule_health_check()
+          {:noreply, state}
+
+        model ->
+          Logger.info("[Summarizer] Ollama now available: #{model}")
+          {:noreply, %{state | ollama_model: model}}
+      end
+    else
+      {:noreply, state}
+    end
   end
 
-  def handle_info({:session_update, _, _}, state), do: {:noreply, state}
-
   # Ignore other PubSub messages
+  def handle_info({:session_update, _, _}, state), do: {:noreply, state}
   def handle_info({:pty_output, _, _}, state), do: {:noreply, state}
   def handle_info({:pty_exit, _, _}, state), do: {:noreply, state}
   def handle_info({:summary, _, _}, state), do: {:noreply, state}
@@ -69,48 +94,50 @@ defmodule Sam.Session.Summarizer do
     %{state | timer_ref: ref}
   end
 
-  defp do_summarize(%{jsonl_path: nil} = state) do
-    %{state | buffer: []}
-  end
-
   defp do_summarize(%{buffer: []} = state), do: state
 
   defp do_summarize(state) do
-    turns = Sam.LLM.OllamaClient.extract_turns(state.jsonl_path)
+    tool_count =
+      Enum.count(state.buffer, &(&1.type == :tool_call))
 
-    if turns == [] do
-      %{state | buffer: []}
-    else
-      summary =
-        case Sam.LLM.OllamaClient.summarize(turns, state.ollama_opts) do
-          {:ok, text} ->
-            text
+    {text, source} =
+      case state.ollama_model do
+        nil ->
+          {Sam.LLM.Ollama.heuristic_label(state.buffer), :heuristic}
 
-          {:error, _reason} ->
-            # Fallback: last assistant message text
-            turns
-            |> Enum.filter(&(&1.role == "assistant"))
-            |> List.last()
-            |> case do
-              %{content: text} -> String.slice(text, 0, 160)
-              nil -> "Agent is working..."
-            end
-        end
+        model ->
+          case Sam.LLM.Ollama.summarize(state.buffer, model, state.ollama_opts) do
+            {:ok, summary} -> {summary, :ollama}
+            {:error, _} -> {Sam.LLM.Ollama.heuristic_label(state.buffer), :heuristic}
+          end
+      end
 
-      summary = sanitize_text(summary)
+    text = sanitize_text(text)
 
-      Phoenix.PubSub.broadcast(
-        Sam.PubSub,
-        "session:#{state.session_id}",
-        {:summary, state.session_id,
-         %{
-           summary: summary,
-           timestamp: DateTime.utc_now()
-         }}
-      )
+    Phoenix.PubSub.broadcast(
+      Sam.PubSub,
+      "session:#{state.session_id}",
+      {:summary, state.session_id,
+       %{
+         text: text,
+         source: source,
+         tool_count: tool_count,
+         timestamp: DateTime.utc_now()
+       }}
+    )
 
-      %{state | buffer: []}
+    %{state | buffer: []}
+  end
+
+  defp detect_ollama(opts) do
+    case Sam.LLM.Ollama.check_availability(opts) do
+      {:ok, model} -> model
+      {:error, _} -> nil
     end
+  end
+
+  defp schedule_health_check do
+    Process.send_after(self(), :health_check, @health_check_interval_ms)
   end
 
   defp cancel_timer(%{timer_ref: nil} = state), do: state
@@ -122,11 +149,8 @@ defmodule Sam.Session.Summarizer do
 
   defp sanitize_text(text) when is_binary(text) do
     text
-    # strip control chars except \n \r \t
     |> String.replace(~r/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/, "")
-    # normalize line endings
     |> String.replace(~r/\r\n?/, "\n")
-    # collapse blank lines
     |> String.replace(~r/\n{3,}/, "\n\n")
     |> String.trim()
     |> ensure_valid_utf8()
@@ -138,7 +162,6 @@ defmodule Sam.Session.Summarizer do
     if String.valid?(text) do
       text
     else
-      # Replace invalid bytes with replacement character
       text
       |> :unicode.characters_to_binary(:utf8, :utf8)
       |> case do
