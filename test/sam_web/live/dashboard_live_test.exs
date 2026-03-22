@@ -131,6 +131,78 @@ defmodule SamWeb.DashboardLiveTest do
     end
   end
 
+  describe "summary tooltip" do
+    setup %{conn: conn} do
+      session_id = "test-tooltip-#{System.unique_integer([:positive])}"
+      summary_text = "Reading server.ex and analyzing session logic"
+
+      {:ok, pid} =
+        Sam.Session.Server.start_link(%{
+          session_id: session_id,
+          name: "Tooltip Test"
+        })
+
+      # Set a summary so it renders in the session card
+      :sys.replace_state(pid, fn state ->
+        %{state | summary: summary_text}
+      end)
+
+      on_exit(fn ->
+        if Process.alive?(pid), do: GenServer.stop(pid)
+      end)
+
+      {:ok, view, _html} = live(conn, "/")
+
+      %{view: view, session_id: session_id, pid: pid, summary_text: summary_text}
+    end
+
+    test "session card renders data-tooltip with full summary text", %{
+      view: view,
+      summary_text: summary_text
+    } do
+      # Switch to SESSIONS panel tab to see session cards
+      view |> element(".panel-tab", "SESSIONS") |> render_click()
+      html = render(view)
+
+      # The data-tooltip attribute should contain the raw (unsanitized) summary
+      assert html =~ "data-tooltip=\"#{summary_text}\""
+    end
+
+    test "session card summary shows sanitized text in visible content", %{
+      view: view
+    } do
+      view |> element(".panel-tab", "SESSIONS") |> render_click()
+      html = render(view)
+
+      assert html =~ "session-card-summary"
+      assert html =~ "Reading server.ex"
+    end
+
+    test "activity items render data-tooltip with full text", %{
+      view: view,
+      session_id: session_id,
+      pid: pid
+    } do
+      # Select the session first
+      view |> element(".sam-tab", "Tooltip Test") |> render_click()
+
+      # Add activity via the :summary handler (how activity actually enters the server)
+      send(
+        pid,
+        {:summary, session_id,
+         %{text: "Editing dashboard_live.ex", source: :heuristic, tool_count: 0}}
+      )
+
+      # Give LiveView a moment to receive the PubSub broadcast from the server
+      Process.sleep(100)
+
+      view |> element(".panel-tab", "ACTIVITY") |> render_click()
+      html = render(view)
+
+      assert html =~ "data-tooltip=\"Editing dashboard_live.ex\""
+    end
+  end
+
   test "elapsed time renders and ticks", %{conn: conn} do
     # Start a session BEFORE mounting the LiveView so it appears on load
     session_id = "test-uptime-e2e-#{System.unique_integer([:positive])}"

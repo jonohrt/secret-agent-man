@@ -1173,16 +1173,9 @@ body::before {
   box-shadow: none;
 }
 
-/* Instant tooltips (no browser delay) */
-[data-tooltip] {
-  position: relative;
-}
-[data-tooltip]:hover::after {
-  content: attr(data-tooltip);
-  position: absolute;
-  left: 0;
-  top: 100%;
-  margin-top: 4px;
+/* Body-level tooltip (positioned via JS to escape overflow:hidden containers) */
+.sam-tooltip {
+  position: fixed;
   background: var(--surface-dim);
   color: var(--on-surface);
   border: 1px solid var(--outline);
@@ -1193,7 +1186,7 @@ body::before {
   line-height: 1.4;
   white-space: pre-wrap;
   max-width: 400px;
-  z-index: 100;
+  z-index: 10000;
   pointer-events: none;
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
 }
