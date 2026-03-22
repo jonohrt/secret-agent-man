@@ -1176,7 +1176,7 @@ body::before {
 /* Body-level tooltip (positioned via JS to escape overflow:hidden containers) */
 .sam-tooltip {
   position: fixed;
-  background: var(--surface-dim);
+  background: var(--surface-container-high);
   color: var(--on-surface);
   border: 1px solid var(--outline);
   border-radius: 4px;
@@ -1189,4 +1189,9 @@ body::before {
   z-index: 10000;
   pointer-events: none;
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+  opacity: 0;
+  transition: opacity 150ms ease-in;
+}
+.sam-tooltip.visible {
+  opacity: 1;
 }

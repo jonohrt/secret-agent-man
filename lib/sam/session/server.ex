@@ -284,7 +284,14 @@ defmodule Sam.Session.Server do
     else
       state = cancel_idle_timer(state)
       state = cancel_needs_input_timer(state)
-      state = %{state | status: :idle, jsonl_turn_active: false}
+
+      # Mark all working agents as done — turn is over, nothing is running
+      agents =
+        Enum.map(state.agents, fn agent ->
+          if agent.status == :working, do: %{agent | status: :done}, else: agent
+        end)
+
+      state = %{state | status: :idle, jsonl_turn_active: false, agents: agents}
       broadcast_ui_update(state)
       {:noreply, state}
     end

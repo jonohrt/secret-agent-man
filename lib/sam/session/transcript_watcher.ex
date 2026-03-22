@@ -46,7 +46,9 @@ defmodule Sam.Session.TranscriptWatcher do
       path: path,
       offset: if(path && File.exists?(path), do: file_size(path), else: 0),
       line_buffer: "",
-      waiting_for_file: path != nil && !File.exists?(path)
+      waiting_for_file: path != nil && !File.exists?(path),
+      # Maps tool_use_id -> tool_name for resolving tool_result events
+      pending_tools: %{}
     }
 
     send(self(), :poll)

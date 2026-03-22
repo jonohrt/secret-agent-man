@@ -22,11 +22,17 @@ function show(e) {
   tooltipEl.textContent = text
   tooltipEl.style.display = "block"
   position(target)
+  // Force reflow so the transition triggers
+  tooltipEl.offsetHeight
+  tooltipEl.classList.add("visible")
 }
 
 function hide() {
   currentTarget = null
-  if (tooltipEl) tooltipEl.style.display = "none"
+  if (tooltipEl) {
+    tooltipEl.classList.remove("visible")
+    tooltipEl.style.display = "none"
+  }
 }
 
 function position(target) {
