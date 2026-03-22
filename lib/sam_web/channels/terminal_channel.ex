@@ -28,6 +28,12 @@ defmodule SamWeb.TerminalChannel do
   end
 
   @impl true
+  def handle_in("resolve_paths", %{"filenames" => filenames}, socket) do
+    resolved = resolve_file_paths(filenames)
+    {:reply, {:ok, %{paths: resolved}}, socket}
+  end
+
+  @impl true
   def handle_info(:request_redraw, socket) do
     # Trigger a resize — this forces most terminal programs to redraw their screen
     # Use default size; the client will send the real size momentarily via the resize event
@@ -42,4 +48,28 @@ defmodule SamWeb.TerminalChannel do
 
   # Ignore other PubSub messages
   def handle_info(_, socket), do: {:noreply, socket}
+
+  # Resolve filenames to full paths by searching common directories
+  defp resolve_file_paths(filenames) do
+    home = System.user_home!()
+
+    search_dirs = [
+      Path.join(home, "Downloads"),
+      Path.join(home, "Desktop"),
+      Path.join(home, "Documents"),
+      home
+    ]
+
+    filenames
+    |> Enum.map(fn name ->
+      Enum.find_value(search_dirs, name, fn dir ->
+        path = Path.join(dir, name)
+        if File.exists?(path), do: path
+      end)
+    end)
+    |> Enum.map(fn path ->
+      if String.contains?(path, " "), do: "'#{path}'", else: path
+    end)
+    |> Enum.join(" ")
+  end
 end

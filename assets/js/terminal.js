@@ -221,21 +221,24 @@ const TerminalHook = {
     })
     container.addEventListener('drop', (e) => {
       e.preventDefault()
-      // Try file:// URIs first (Finder on macOS provides these)
-      const uriList = e.dataTransfer.getData('text/uri-list')
-      if (uriList && this.channel) {
-        const paths = uriList.split('\n')
-          .filter(u => u.startsWith('file://'))
-          .map(u => decodeURIComponent(new URL(u).pathname))
-          .map(p => p.includes(' ') ? `'${p}'` : p)
-        if (paths.length > 0) {
-          this.channel.push('input', { data: paths.join(' ') })
-          return
-        }
+      if (!this.channel) return
+
+      // Browser security prevents access to full filesystem paths.
+      // Send filenames to server to resolve against common directories.
+      const files = e.dataTransfer.files
+      if (files.length > 0) {
+        const names = Array.from(files).map(f => f.name)
+        this.channel.push('resolve_paths', { filenames: names })
+          .receive('ok', ({ paths }) => {
+            // Paste into terminal input (not stdin) so user can edit before Enter
+            this.term.paste(paths)
+          })
+        return
       }
-      // Fallback: plain text (e.g. paths dragged from other apps)
+
+      // Fallback: plain text drops (e.g. dragging text from another app)
       const text = e.dataTransfer.getData('text/plain')
-      if (text && this.channel) {
+      if (text) {
         this.channel.push('input', { data: text })
       }
     })

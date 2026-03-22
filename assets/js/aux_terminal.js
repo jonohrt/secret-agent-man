@@ -96,19 +96,20 @@ const AuxTerminalHook = {
     })
     this.el.addEventListener('drop', (e) => {
       e.preventDefault()
-      const uriList = e.dataTransfer.getData('text/uri-list')
-      if (uriList && this.channel) {
-        const paths = uriList.split('\n')
-          .filter(u => u.startsWith('file://'))
-          .map(u => decodeURIComponent(new URL(u).pathname))
-          .map(p => p.includes(' ') ? `'${p}'` : p)
-        if (paths.length > 0) {
-          this.channel.push('input', { data: paths.join(' ') })
-          return
-        }
+      if (!this.channel) return
+
+      const files = e.dataTransfer.files
+      if (files.length > 0) {
+        const names = Array.from(files).map(f => f.name)
+        this.channel.push('resolve_paths', { filenames: names })
+          .receive('ok', ({ paths }) => {
+            this.term.paste(paths)
+          })
+        return
       }
+
       const text = e.dataTransfer.getData('text/plain')
-      if (text && this.channel) {
+      if (text) {
         this.channel.push('input', { data: text })
       }
     })
