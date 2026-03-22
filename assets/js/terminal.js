@@ -214,6 +214,35 @@ const TerminalHook = {
     // Focus terminal on click so Vimium enters Insert Mode
     container.addEventListener('click', () => this.term.focus())
 
+    // Drag and drop files → paste file path into terminal
+    container.addEventListener('dragover', (e) => {
+      e.preventDefault()
+      e.dataTransfer.dropEffect = 'copy'
+    })
+    container.addEventListener('drop', (e) => {
+      e.preventDefault()
+      if (!this.channel) return
+
+      // Browser security prevents access to full filesystem paths.
+      // Send filenames to server to resolve against common directories.
+      const files = e.dataTransfer.files
+      if (files.length > 0) {
+        const names = Array.from(files).map(f => f.name)
+        this.channel.push('resolve_paths', { filenames: names })
+          .receive('ok', ({ paths }) => {
+            // Paste into terminal input (not stdin) so user can edit before Enter
+            this.term.paste(paths)
+          })
+        return
+      }
+
+      // Fallback: plain text drops (e.g. dragging text from another app)
+      const text = e.dataTransfer.getData('text/plain')
+      if (text) {
+        this.channel.push('input', { data: text })
+      }
+    })
+
     // Window-level ESC handler — works even if xterm doesn't have focus
     // Only send if this terminal is currently visible
     if (!this._escHandler) {
